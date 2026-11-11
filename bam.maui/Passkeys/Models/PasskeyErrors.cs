@@ -45,6 +45,9 @@ public enum PasskeyErrorCategory
     /// <summary>The operation is switched off in <see cref="PasskeyFeatures"/>.</summary>
     FeatureDisabled,
 
+    /// <summary>The device already holds a passkey for this account, so another was not created.</summary>
+    CredentialAlreadyRegistered,
+
     /// <summary>Anything else.</summary>
     Unknown
 }

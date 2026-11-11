@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Phase 2: native authenticators (bam.maui#4)
+
+Added
+- `AndroidPasskeyAuthenticator` (Credential Manager, Android 14+), `ApplePasskeyAuthenticator` (AuthenticationServices, iOS and Mac Catalyst 16+) and `WindowsPasskeyAuthenticator` (`webauthn.dll`).
+- `PlatformPasskeyAuthenticator`, their shared base. It refuses options that are malformed or name a relying party other than the configured one before any platform is called.
+- `WebAuthnCreationRequest` and `WebAuthnAssertionRequest`, the parsed options; `WebAuthnResponseJson` and `WebAuthnClientData`, which write standard WebAuthn JSON for Apple and Windows.
+- `AndroidPasskeyErrors`, `ApplePasskeyErrors` and `WindowsPasskeyErrors`, which map each platform's failures onto `PasskeyErrorCategory`.
+- `PasskeyErrorCategory.CredentialAlreadyRegistered` and its message, for a device that already holds a passkey from the exclude list.
+- `PasskeyPlatform.CreateAuthenticator`. `AddPasskeyClient` binds its result when the host has not bound an authenticator.
+- `bam.maui` and `bam.maui.tests` are in `bamtk.sln`.
+- Platform setup and manual verification steps in the README.
+- 14 unit tests (36 in all): suites `pkwj`, `pkwn`, `pkpe`.
+
+Changed
+- Inside `bamtk.sln` the library builds `net10.0` only; `-p:BamMauiPlatformTargets` overrides.
+- A cancelled operation's log line now names the exception type and its cause, so a real failure that lost a race with the caller's cancellation can still be found.
+- `RelyingPartyId` refuses a last label that is `0x` plus hex digits; URL parsers read it as a number.
+- The capability-probe test gives each probe its own client and a live token.
+
+Decisions
+- A platform timeout is `ExpiredChallenge`, never `UserCancelled`.
+- Android errors are mapped by Java class name. The binding passes the callback's exception as a plain Java object, and the name is what survives that.
+- The Windows authenticator states the origin `https://<rp id>`. Windows does not verify it.
+- `Xamarin.AndroidX.Credentials` is pinned to 1.5.0.3, the newest version whose AndroidX dependencies agree with MAUI 10.0.20.
+
+Outstanding
+- No ceremony has been run on a device. The README lists the steps.
+- Apple: `excludeCredentials` is not passed (the binding does not expose it for platform passkeys) and security keys are not offered.
+- Android below API 34 (Phase 6).
+- HTTP backend and views (phases 3 to 5).
+
 ### Phase 1: passkey foundation (bam.maui#2)
 
 Added
@@ -12,13 +43,6 @@ Added
 - `UnsupportedPasskeyAuthenticator`, the default until a platform authenticator is registered.
 - Registration: `ServiceRegistry.AddPasskeyClient` and `IServiceCollection.AddBamPasskeys`.
 - `bam.maui.tests` (bam.test): 22 unit tests.
-
-Review round 2
-- A probe the caller cancelled is cancelled whatever the authenticator threw; the token decides, not the exception type.
-- Once the caller cancels, the operation reports `UserCancelled` even when the failure looks like a timeout.
-- A stray cancellation from a probe is logged as a failed probe.
-- `RelyingPartyId` refuses IP addresses and all-digit names.
-- A plain `net10.0` target, and a `bam.base` reference resolved through `$(BamFrameworkRoot)`.
 
 Changed
 - Minimum iOS and Mac Catalyst versions raised to 15.0, the minimum MAUI 10 supports.
@@ -35,11 +59,18 @@ Review round 1
 - Log content is pinned by tests; a logger that throws can't break a result; the inner exception's type name is logged.
 - Needs bam.base#42 (`Logger.BlockUntilEventQueueIsEmpty`) for the log tests.
 
+Review round 2
+- A probe the caller cancelled is cancelled whatever the authenticator threw; the token decides, not the exception type.
+- Once the caller cancels, the operation reports `UserCancelled` even when the failure looks like a timeout.
+- A stray cancellation from a probe is logged as a failed probe.
+- `RelyingPartyId` refuses IP addresses and all-digit names.
+- A plain `net10.0` target, and a `bam.base` reference resolved through `$(BamFrameworkRoot)`.
+
 Decisions
 - Platform integrations are the library's own, behind `IPasskeyAuthenticator`. MAUI's Essentials passkey API needs .NET 11; bamtk is on .NET 10.
 - WebAuthn data is carried as standard JSON, not parsed into typed fields, so the backend's HTTP contract is the only contract and the app doesn't reference bam.useraccounts.
 - Colours in `PasskeyBranding` are hex strings so configuration has no UI dependency.
 
-Outstanding
-- No platform authenticator, HTTP backend or views yet (phases 2 to 5).
-- `bam.maui` is not in `bamtk.sln` yet; that comes with Phase 2.
+Outstanding at the end of Phase 1
+- No platform authenticator, HTTP backend or views (phases 2 to 5).
+- `bam.maui` was not in `bamtk.sln`.

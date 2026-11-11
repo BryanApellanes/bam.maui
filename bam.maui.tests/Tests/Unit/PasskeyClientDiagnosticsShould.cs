@@ -141,9 +141,10 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
                 };
                 PasskeyClient shapedClient = shaped.Client();
                 PasskeyResult<PasskeySignIn> shapedCeremony = Wait(shapedClient.AuthenticateAsync(shapedSource.Token));
-                bool probesThrow = Cancels(() => Wait(shapedClient.GetCapabilitiesAsync(shapedSource.Token)))
-                    && Cancels(() => Wait(shapedClient.IsSupportedAsync(shapedSource.Token)))
-                    && Cancels(() => Wait(shapedClient.GetPasskeyStatusAsync(shapedSource.Token)));
+                // Each probe gets its own client and a token that is live until the authenticator is running.
+                bool probesThrow = CancelsDuringProbe(shape, (probed, token) => probed.GetCapabilitiesAsync(token))
+                    && CancelsDuringProbe(shape, (probed, token) => probed.IsSupportedAsync(token))
+                    && CancelsDuringProbe(shape, (probed, token) => probed.GetPasskeyStatusAsync(token));
                 if (shapedCeremony.Error?.Category != PasskeyErrorCategory.UserCancelled || !probesThrow)
                 {
                     misreported.Add(shape.GetType().Name + ":" + shapedCeremony.Error?.Category);
@@ -219,7 +220,8 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
                 text.Contains(nameof(InvalidOperationException)),
                 text.Contains(nameof(FormatException)),
                 text.Contains(nameof(PasskeyErrorCategory.NetworkFailure)),
-                text.Contains("capability probe"), string.Join(",", events.Select(e => e.Severity + ":" + e.MessageSignature)));
+                text.Contains("capability probe"), string.Join(",", events.Select(e => e.Severity + ":" + e.MessageSignature)),
+                string.Join(",", events.Last().MessageVariableValues ?? Array.Empty<string?>()));
         })
         .TheTest
         .ShouldPass<LogOutcome>((because, outcome) =>
@@ -227,6 +229,7 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
             because.ItsTrue("each of the four failures is logged once", outcome.FailureEvents == 4);
             because.ItsTrue("failures are logged as warnings", outcome.FailuresAreWarnings);
             because.ItsTrue("a cancellation is logged as information: " + outcome.Entries, outcome.CancellationSeverity == LogEventType.Information);
+            because.ItsTrue("the cancellation line names the operation, the exception type and its cause: " + outcome.CancellationValues, outcome.CancellationValues == "username-less authentication,PasskeyException,none");
             because.ItsTrue("no exception message, diagnostic message or inner message is logged", !outcome.MarkerLogged);
             because.ItsTrue("the operation is named", outcome.OperationLogged);
             because.ItsTrue("the category is named", outcome.CategoryLogged);
@@ -280,6 +283,21 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
         Wait(client.AuthenticateAsync());
     }
 
+    private static bool CancelsDuringProbe<TResult>(Exception shape, Func<PasskeyClient, CancellationToken, Task<TResult>> probe)
+    {
+        PasskeyClientFixture fixture = new PasskeyClientFixture();
+        using CancellationTokenSource source = new CancellationTokenSource();
+        bool tokenWasLive = false;
+        fixture.Authenticator.CapabilitiesProbe = token =>
+        {
+            tokenWasLive = !token.IsCancellationRequested;
+            source.Cancel();
+            throw shape;
+        };
+        PasskeyClient client = fixture.Client();
+        return Cancels(() => Wait(probe(client, source.Token))) && tokenWasLive;
+    }
+
     private static bool Cancels(Action action)
     {
         try
@@ -302,7 +320,7 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
 
     private sealed record ProbeOutcome(PasskeyErrorCategory? CeremonyCategory, bool CeremonyWasCancelled, int CollaboratorCalls, bool CapabilitiesThrew, bool IsSupportedThrew, bool StatusThrew, bool StrayCancellationSupported, string Misreported, bool StatusThrewDuringListing, LogEventType? StrayCancellationSeverity);
 
-    private sealed record LogOutcome(int FailureEvents, bool FailuresAreWarnings, LogEventType CancellationSeverity, bool MarkerLogged, bool OperationLogged, bool CategoryLogged, bool TypeLogged, bool InnerTypeLogged, bool NetworkLogged, bool ProbeLogged, string Entries);
+    private sealed record LogOutcome(int FailureEvents, bool FailuresAreWarnings, LogEventType CancellationSeverity, bool MarkerLogged, bool OperationLogged, bool CategoryLogged, bool TypeLogged, bool InnerTypeLogged, bool NetworkLogged, bool ProbeLogged, string Entries, string CancellationValues);
 
     private sealed record LoggerWiringOutcome(PasskeyErrorCategory? BrokenLoggerCategory, int RegistryLoggerEvents, bool MarkerLogged);
 }

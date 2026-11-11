@@ -199,14 +199,14 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
         {
             "example.com\n", "exa\tmple.com", " example.com", "\u00A0example.com", "user@example.com", "*.example.com", "..", ".", "-",
             "example..com", "example.com?x=1", "example.com#f", "example.com.", ".example.com", "-example.com", "example-.com",
-            "example.com/path", "exa mple.com", "ex_ample.com", "127.0.0.1", "192.168.1.10", "123", "example.123", new string('a', 64) + ".com", string.Join(".", Enumerable.Repeat("abcdefghi", 26))
+            "example.com/path", "exa mple.com", "ex_ample.com", "127.0.0.1", "192.168.1.10", "123", "example.123", "example.0x1f", "0x7f000001", "example.0x", "0x", new string('a', 64) + ".com", string.Join(".", Enumerable.Repeat("abcdefghi", 26))
         };
         return string.Join(" ", malformed.Where(id => !ThrowsFor(c => c.RelyingPartyId = id)).Select(id => "[" + id + "]"));
     }
 
     private static string WellFormedRelyingPartyIdsRefused()
     {
-        string[] wellFormed = { "example.com", "app.example.com", "localhost", "xn--bcher-kva.example", "a-b.example.co.uk", "1example.com", new string('a', 63) + ".com" };
+        string[] wellFormed = { "example.com", "app.example.com", "localhost", "xn--bcher-kva.example", "a-b.example.co.uk", "1example.com", "0x1f.example.com", "example.0xg", "example.x0", new string('a', 63) + ".com" };
         return string.Join(" ", wellFormed.Where(id => ThrowsFor(c => c.RelyingPartyId = id)));
     }
 

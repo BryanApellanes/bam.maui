@@ -3,9 +3,14 @@
 	<PropertyGroup>
 		<!-- The plain net10.0 target carries the passkey contracts and orchestration so they build and test without a device. -->
 		<TargetFrameworks>net10.0</TargetFrameworks>
+		<!-- bamtk.sln is built into one output folder (run-tests.sh), where several targets of one project would overwrite
+		     each other, so inside that solution only net10.0 is built.  Building this project directly or from an app
+		     solution builds every target.  -p:BamMauiPlatformTargets=true|false overrides either way. -->
+		<BamMauiPlatformTargets Condition="'$(BamMauiPlatformTargets)' == '' And '$(SolutionFileName)' == 'bamtk.sln'">false</BamMauiPlatformTargets>
+		<BamMauiPlatformTargets Condition="'$(BamMauiPlatformTargets)' == ''">true</BamMauiPlatformTargets>
 		<!-- The Apple and Android workloads do not restore on Linux, so platform targets are added everywhere else. -->
-		<TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">$(TargetFrameworks);net10.0-android;net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
-		<TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+		<TargetFrameworks Condition="'$(BamMauiPlatformTargets)' == 'true' And !$([MSBuild]::IsOSPlatform('linux'))">$(TargetFrameworks);net10.0-android;net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
+		<TargetFrameworks Condition="'$(BamMauiPlatformTargets)' == 'true' And $([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
 		<UseMaui>true</UseMaui>
 		<SingleProject>true</SingleProject>
 		<ImplicitUsings>enable</ImplicitUsings>
@@ -22,6 +27,21 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="10.0.20" />
+		<!-- Android Credential Manager.  Microsoft's binding of androidx.credentials; bamtk has no equivalent. -->
+		<PackageReference Include="Xamarin.AndroidX.Credentials" Version="1.5.0.3" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'" />
+	</ItemGroup>
+
+	<PropertyGroup>
+		<BamTargetPlatform>$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)'))</BamTargetPlatform>
+	</PropertyGroup>
+
+	<!-- Each platform's authenticator compiles only where its API exists.  The Windows one is plain P/Invoke, so it also
+	     compiles for net10.0, where its tests run. -->
+	<ItemGroup>
+		<Compile Remove="Passkeys/Native/Android/**" Condition="'$(BamTargetPlatform)' != 'android'" />
+		<Compile Remove="Passkeys/Native/Apple/**" Condition="'$(BamTargetPlatform)' != 'ios' And '$(BamTargetPlatform)' != 'maccatalyst'" />
+		<Compile Remove="Passkeys/Native/Windows/**" Condition="'$(BamTargetPlatform)' != 'windows' And '$(BamTargetPlatform)' != ''" />
+		<InternalsVisibleTo Include="bam.maui.tests" />
 	</ItemGroup>
 
 	<ItemGroup>

@@ -271,6 +271,11 @@ public sealed class PasskeyClient : IPasskeyClient
         return result.Error is null ? PasskeyResult.Success() : PasskeyResult.Failure(result.Error);
     }
 
+    private static string CauseOf(Exception exception)
+    {
+        return exception.InnerException is null ? "none" : exception.InnerException.GetType().Name;
+    }
+
     private void LogFailure(string operation, PasskeyErrorCategory category, Exception exception)
     {
         if (_logger is null)
@@ -282,12 +287,12 @@ public sealed class PasskeyClient : IPasskeyClient
             // Type names only: exception messages can carry server text or payload fragments.
             if (category == PasskeyErrorCategory.UserCancelled)
             {
-                _logger.Info("Passkey {0} cancelled.", operation);
+                // The caller's cancellation can win a race against a real failure; the type names keep that failure findable.
+                _logger.Info("Passkey {0} cancelled: exception {1}, cause {2}.", operation, exception.GetType().Name, CauseOf(exception));
             }
             else
             {
-                string cause = exception.InnerException is null ? "none" : exception.InnerException.GetType().Name;
-                _logger.Warning("Passkey {0} failed: category {1}, exception {2}, cause {3}.", operation, category.ToString(), exception.GetType().Name, cause);
+                _logger.Warning("Passkey {0} failed: category {1}, exception {2}, cause {3}.", operation, category.ToString(), exception.GetType().Name, CauseOf(exception));
             }
         }
         catch (Exception)
