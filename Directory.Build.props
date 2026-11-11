@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Inside bamtk the framework libraries are siblings of this repo; standalone they are nested submodules. -->
+    <BamFrameworkRoot Condition="Exists('$(MSBuildThisFileDirectory)..\..\bamtk.sln')">$(MSBuildThisFileDirectory)..\</BamFrameworkRoot>
+    <BamFrameworkRoot Condition="!Exists('$(MSBuildThisFileDirectory)..\..\bamtk.sln')">$(MSBuildThisFileDirectory)submodules\</BamFrameworkRoot>
+  </PropertyGroup>
+</Project>
