@@ -39,10 +39,10 @@ public sealed class PasskeyConfiguration
         {
             throw new ArgumentException("PasskeyConfiguration.RelyingPartyId is required.");
         }
-        if (!HostName.IsMatch(RelyingPartyId))
+        if (!HostName.IsMatch(RelyingPartyId) || PasskeyHostNames.LastLabelIsNumeric(RelyingPartyId))
         {
             // The value is not echoed: it may hold control characters, which is one of the things being refused.
-            throw new ArgumentException("PasskeyConfiguration.RelyingPartyId must be a bare lowercase DNS host name (letters, digits and hyphens in dot-separated labels) with no scheme, port, path, whitespace or trailing dot.");
+            throw new ArgumentException("PasskeyConfiguration.RelyingPartyId must be a bare lowercase DNS host name (letters, digits and hyphens in dot-separated labels) with no scheme, port, path, whitespace or trailing dot, and not an IP address.");
         }
         if (Features is null)
         {
@@ -59,6 +59,16 @@ public sealed class PasskeyConfiguration
         Features.Validate();
         Branding.Validate();
         Messages.Validate();
+    }
+}
+
+internal static class PasskeyHostNames
+{
+    // A WebAuthn RP id is a domain, never an address: a name whose last label is all digits is an IPv4 address or a bare number.
+    internal static bool LastLabelIsNumeric(string host)
+    {
+        string last = host.Substring(host.LastIndexOf('.') + 1);
+        return last.Length > 0 && last.All(char.IsAsciiDigit);
     }
 }
 

@@ -14,7 +14,8 @@ namespace Bam.Maui.Passkeys;
 /// </para>
 /// <para>
 /// A cancellation is reported as <see cref="PasskeyErrorCategory.UserCancelled"/> only when the
-/// caller's token was cancelled or the authenticator reported it.  A cancellation thrown by the
+/// caller's token was cancelled or the authenticator reported it; once the caller's token is
+/// cancelled, any failure of that operation is reported as cancelled.  A cancellation thrown by the
 /// backend while the caller's token is live (an aborted request, the backend's own timeout) is a
 /// <see cref="PasskeyErrorCategory.NetworkFailure"/>, so a network fault never looks like the
 /// user's choice.
@@ -63,15 +64,19 @@ public sealed class PasskeyClient : IPasskeyClient
             PasskeyCapabilities? capabilities = await _authenticator.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
             return capabilities ?? PasskeyCapabilities.Unsupported();
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception exception) when (cancellationToken.IsCancellationRequested)
         {
-            // A cancelled probe says nothing about the device; reporting "not supported" here would hide passkeys on a device that has them.
-            throw;
+            // A cancelled probe says nothing about the device; reporting "not supported" here would hide passkeys on a
+            // device that has them.  The token decides, not the exception: platform APIs signal cancellation in their
+            // own ways, and whatever the authenticator threw after the caller cancelled is still a cancelled probe.
+            throw new OperationCanceledException("The capability probe was cancelled.", exception, cancellationToken);
         }
         catch (Exception exception)
         {
             // A probe that fails is reported as not supported; claiming support here would send the user into a ceremony that cannot run.
-            LogFailure("capability probe", PasskeyErrorNormalizer.Categorize(exception), exception);
+            // Nobody cancelled, so a cancellation thrown here is a failed probe and is logged as one.
+            PasskeyErrorCategory category = PasskeyErrorNormalizer.Categorize(exception);
+            LogFailure("capability probe", category == PasskeyErrorCategory.UserCancelled ? PasskeyErrorCategory.PlatformFailure : category, exception);
             return PasskeyCapabilities.Unsupported();
         }
     }
@@ -215,7 +220,10 @@ public sealed class PasskeyClient : IPasskeyClient
         }
         catch (Exception exception)
         {
-            PasskeyError error = _normalizer.Normalize(exception);
+            // The caller's cancellation wins over whatever shape the failure took on the way out.
+            PasskeyError error = cancellationToken.IsCancellationRequested
+                ? _normalizer.FromCategory(PasskeyErrorCategory.UserCancelled)
+                : _normalizer.Normalize(exception);
             LogFailure(operation, error.Category, exception);
             return PasskeyResult<TValue>.Failure(error);
         }

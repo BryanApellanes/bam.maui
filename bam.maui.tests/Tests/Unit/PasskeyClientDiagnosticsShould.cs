@@ -36,6 +36,29 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
             deleteAbort.Backend.Failures["backend.deletePasskey"] = new TaskCanceledException();
             PasskeyResult abortedDelete = Wait(deleteAbort.Client().DeletePasskeyAsync("id"));
 
+            PasskeyClientFixture registerAbort = new PasskeyClientFixture();
+            registerAbort.Backend.Failures["backend.beginRegistration"] = new TaskCanceledException();
+            PasskeyResult<PasskeySignIn> abortedRegistration = Wait(registerAbort.Client().RegisterPasskeyAsync(new PasskeyRegistrationRequest { Handle = "ada" }));
+
+            PasskeyClientFixture registerCompleteAbort = new PasskeyClientFixture();
+            registerCompleteAbort.Backend.Failures["backend.completeRegistration"] = new TaskCanceledException();
+            PasskeyResult<PasskeySignIn> abortedRegistrationComplete = Wait(registerCompleteAbort.Client().RegisterPasskeyAsync(new PasskeyRegistrationRequest { Handle = "ada" }));
+
+            PasskeyClientFixture addAbort = new PasskeyClientFixture();
+            addAbort.Backend.Failures["backend.beginAdditional"] = new TaskCanceledException();
+            PasskeyResult abortedAdd = Wait(addAbort.Client().AddPasskeyAsync());
+
+            PasskeyClientFixture addCompleteAbort = new PasskeyClientFixture();
+            addCompleteAbort.Backend.Failures["backend.completeAdditional"] = new TaskCanceledException();
+            PasskeyResult abortedAddComplete = Wait(addCompleteAbort.Client().AddPasskeyAsync());
+
+            // The caller cancels and the transport reports it as a timeout; the caller's cancellation wins.
+            PasskeyClientFixture timeoutShape = new PasskeyClientFixture();
+            using CancellationTokenSource timeoutSource = new CancellationTokenSource();
+            timeoutShape.Backend.BeforeCall = call => timeoutSource.Cancel();
+            timeoutShape.Backend.Failures["backend.beginAuthentication"] = new TaskCanceledException("timeout", new TimeoutException());
+            PasskeyResult<PasskeySignIn> cancelledWithTimeoutShape = Wait(timeoutShape.Client().AuthenticateAsync(timeoutSource.Token));
+
             // The caller cancels while the backend call is in flight.
             PasskeyClientFixture callerCancels = new PasskeyClientFixture();
             using CancellationTokenSource source = new CancellationTokenSource();
@@ -54,7 +77,12 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
                 abortedListing.Error?.Category,
                 abortedDelete.Error?.Category,
                 callerCancelled.Error?.Category,
-                userDismissed.Error?.Category);
+                userDismissed.Error?.Category,
+                abortedRegistration.Error?.Category,
+                abortedRegistrationComplete.Error?.Category,
+                abortedAdd.Error?.Category,
+                abortedAddComplete.Error?.Category,
+                cancelledWithTimeoutShape.Error?.Category);
         })
         .TheTest
         .ShouldPass<CancellationSourceOutcome>((because, outcome) =>
@@ -66,6 +94,11 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
             because.ItsTrue("the same holds for deletion", outcome.DeleteAbort == PasskeyErrorCategory.NetworkFailure);
             because.ItsTrue("a cancellation after the caller cancelled is user cancelled", outcome.CallerCancelled == PasskeyErrorCategory.UserCancelled);
             because.ItsTrue("a cancellation from the authenticator is user cancelled", outcome.UserDismissed == PasskeyErrorCategory.UserCancelled);
+            because.ItsTrue("a backend cancellation at registration begin is a network failure", outcome.RegistrationAbort == PasskeyErrorCategory.NetworkFailure);
+            because.ItsTrue("a backend cancellation at registration complete is a network failure", outcome.RegistrationCompleteAbort == PasskeyErrorCategory.NetworkFailure);
+            because.ItsTrue("a backend cancellation at add begin is a network failure", outcome.AddAbort == PasskeyErrorCategory.NetworkFailure);
+            because.ItsTrue("a backend cancellation at add complete is a network failure", outcome.AddCompleteAbort == PasskeyErrorCategory.NetworkFailure);
+            because.ItsTrue("the caller's cancellation wins over a timeout-shaped exception", outcome.CallerCancelledWithTimeoutShape == PasskeyErrorCategory.UserCancelled);
         })
         .SoBeHappy()
         .UnlessItFailed();
@@ -88,10 +121,48 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
             PasskeyClient client = fixture.Client();
             PasskeyResult<PasskeySignIn> ceremony = Wait(client.AuthenticateAsync(source.Token));
 
+            // Platform APIs do not signal cancellation with OperationCanceledException; the token decides.
+            List<string> misreported = new List<string>();
+            Exception[] shapes =
+            {
+                new InvalidOperationException("java cancellation"),
+                new AggregateException(new TaskCanceledException()),
+                new PasskeyException(PasskeyErrorCategory.UserCancelled),
+                new PasskeyException(PasskeyErrorCategory.PlatformFailure)
+            };
+            foreach (Exception shape in shapes)
+            {
+                PasskeyClientFixture shaped = new PasskeyClientFixture();
+                using CancellationTokenSource shapedSource = new CancellationTokenSource();
+                shaped.Authenticator.CapabilitiesProbe = token =>
+                {
+                    shapedSource.Cancel();
+                    throw shape;
+                };
+                PasskeyClient shapedClient = shaped.Client();
+                PasskeyResult<PasskeySignIn> shapedCeremony = Wait(shapedClient.AuthenticateAsync(shapedSource.Token));
+                bool probesThrow = Cancels(() => Wait(shapedClient.GetCapabilitiesAsync(shapedSource.Token)))
+                    && Cancels(() => Wait(shapedClient.IsSupportedAsync(shapedSource.Token)))
+                    && Cancels(() => Wait(shapedClient.GetPasskeyStatusAsync(shapedSource.Token)));
+                if (shapedCeremony.Error?.Category != PasskeyErrorCategory.UserCancelled || !probesThrow)
+                {
+                    misreported.Add(shape.GetType().Name + ":" + shapedCeremony.Error?.Category);
+                }
+            }
+
+            // The caller cancels while the status call is listing passkeys, after the probe has answered.
+            PasskeyClientFixture listing = new PasskeyClientFixture();
+            using CancellationTokenSource listingSource = new CancellationTokenSource();
+            listing.Backend.BeforeCall = call => listingSource.Cancel();
+            bool statusThrewDuringListing = Cancels(() => Wait(listing.Client().GetPasskeyStatusAsync(listingSource.Token)));
+
             // A probe that throws a cancellation nobody asked for is a failed probe, not a cancelled one.
             PasskeyClientFixture strayCancellation = new PasskeyClientFixture();
             strayCancellation.Authenticator.CapabilitiesFailure = new OperationCanceledException();
-            bool strayIsSupported = Wait(strayCancellation.Client().IsSupportedAsync());
+            CapturingLogger strayLogger = new CapturingLogger();
+            PasskeyClient strayClient = new PasskeyClient(strayCancellation.Backend, strayCancellation.Authenticator, strayCancellation.Configuration, new PasskeyErrorNormalizer(strayCancellation.Configuration.Messages), strayLogger);
+            bool strayIsSupported = Wait(strayClient.IsSupportedAsync());
+            LogEventType? straySeverity = strayLogger.Events.Select(e => (LogEventType?)e.Severity).FirstOrDefault();
 
             return new ProbeOutcome(
                 ceremony.Error?.Category,
@@ -100,7 +171,10 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
                 Cancels(() => Wait(client.GetCapabilitiesAsync(source.Token))),
                 Cancels(() => Wait(client.IsSupportedAsync(source.Token))),
                 Cancels(() => Wait(client.GetPasskeyStatusAsync(source.Token))),
-                strayIsSupported);
+                strayIsSupported,
+                string.Join(" ", misreported),
+                statusThrewDuringListing,
+                straySeverity);
         })
         .TheTest
         .ShouldPass<ProbeOutcome>((because, outcome) =>
@@ -112,6 +186,9 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
             because.ItsTrue("IsSupportedAsync rethrows the caller's cancellation", outcome.IsSupportedThrew);
             because.ItsTrue("GetPasskeyStatusAsync rethrows the caller's cancellation", outcome.StatusThrew);
             because.ItsTrue("a cancellation the caller did not ask for is a failed probe: not supported, no throw", !outcome.StrayCancellationSupported);
+            because.ItsTrue("and it is logged as a failure, not as a cancellation", outcome.StrayCancellationSeverity == LogEventType.Warning);
+            because.ItsTrue("whatever the authenticator throws after the caller cancelled is a cancelled probe: " + outcome.Misreported, outcome.Misreported.Length == 0);
+            because.ItsTrue("GetPasskeyStatusAsync rethrows a cancellation that arrives during the listing", outcome.StatusThrewDuringListing);
         })
         .SoBeHappy()
         .UnlessItFailed();
@@ -147,7 +224,7 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
         .TheTest
         .ShouldPass<LogOutcome>((because, outcome) =>
         {
-            because.ItsTrue("each failure is logged (the failed probe logs twice: the probe, then the refused ceremony is not an exception)", outcome.FailureEvents == 4);
+            because.ItsTrue("each of the four failures is logged once", outcome.FailureEvents == 4);
             because.ItsTrue("failures are logged as warnings", outcome.FailuresAreWarnings);
             because.ItsTrue("a cancellation is logged as information: " + outcome.Entries, outcome.CancellationSeverity == LogEventType.Information);
             because.ItsTrue("no exception message, diagnostic message or inner message is logged", !outcome.MarkerLogged);
@@ -221,9 +298,9 @@ public class PasskeyClientDiagnosticsShould : UnitTestMenuContainer
         return task.GetAwaiter().GetResult();
     }
 
-    private sealed record CancellationSourceOutcome(PasskeyErrorCategory? BackendAbort, bool BackendAbortWasCancelled, PasskeyErrorCategory? BackendAbortAtComplete, PasskeyErrorCategory? ListingAbort, PasskeyErrorCategory? DeleteAbort, PasskeyErrorCategory? CallerCancelled, PasskeyErrorCategory? UserDismissed);
+    private sealed record CancellationSourceOutcome(PasskeyErrorCategory? BackendAbort, bool BackendAbortWasCancelled, PasskeyErrorCategory? BackendAbortAtComplete, PasskeyErrorCategory? ListingAbort, PasskeyErrorCategory? DeleteAbort, PasskeyErrorCategory? CallerCancelled, PasskeyErrorCategory? UserDismissed, PasskeyErrorCategory? RegistrationAbort, PasskeyErrorCategory? RegistrationCompleteAbort, PasskeyErrorCategory? AddAbort, PasskeyErrorCategory? AddCompleteAbort, PasskeyErrorCategory? CallerCancelledWithTimeoutShape);
 
-    private sealed record ProbeOutcome(PasskeyErrorCategory? CeremonyCategory, bool CeremonyWasCancelled, int CollaboratorCalls, bool CapabilitiesThrew, bool IsSupportedThrew, bool StatusThrew, bool StrayCancellationSupported);
+    private sealed record ProbeOutcome(PasskeyErrorCategory? CeremonyCategory, bool CeremonyWasCancelled, int CollaboratorCalls, bool CapabilitiesThrew, bool IsSupportedThrew, bool StatusThrew, bool StrayCancellationSupported, string Misreported, bool StatusThrewDuringListing, LogEventType? StrayCancellationSeverity);
 
     private sealed record LogOutcome(int FailureEvents, bool FailuresAreWarnings, LogEventType CancellationSeverity, bool MarkerLogged, bool OperationLogged, bool CategoryLogged, bool TypeLogged, bool InnerTypeLogged, bool NetworkLogged, bool ProbeLogged, string Entries);
 

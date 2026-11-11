@@ -12,6 +12,12 @@ Added
 - `UnsupportedPasskeyAuthenticator`, the default until a platform authenticator is registered.
 - Registration: `ServiceRegistry.AddPasskeyClient` and `IServiceCollection.AddBamPasskeys`.
 - `bam.maui.tests` (bam.test): 22 unit tests.
+
+Review round 2
+- A probe the caller cancelled is cancelled whatever the authenticator threw; the token decides, not the exception type.
+- Once the caller cancels, the operation reports `UserCancelled` even when the failure looks like a timeout.
+- A stray cancellation from a probe is logged as a failed probe.
+- `RelyingPartyId` refuses IP addresses and all-digit names.
 - A plain `net10.0` target, and a `bam.base` reference resolved through `$(BamFrameworkRoot)`.
 
 Changed

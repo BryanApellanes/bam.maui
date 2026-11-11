@@ -199,7 +199,7 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
         {
             "example.com\n", "exa\tmple.com", " example.com", "\u00A0example.com", "user@example.com", "*.example.com", "..", ".", "-",
             "example..com", "example.com?x=1", "example.com#f", "example.com.", ".example.com", "-example.com", "example-.com",
-            "example.com/path", "exa mple.com", "ex_ample.com", new string('a', 64) + ".com", string.Join(".", Enumerable.Repeat("abcdefghi", 26))
+            "example.com/path", "exa mple.com", "ex_ample.com", "127.0.0.1", "192.168.1.10", "123", "example.123", new string('a', 64) + ".com", string.Join(".", Enumerable.Repeat("abcdefghi", 26))
         };
         return string.Join(" ", malformed.Where(id => !ThrowsFor(c => c.RelyingPartyId = id)).Select(id => "[" + id + "]"));
     }

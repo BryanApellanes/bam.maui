@@ -113,7 +113,7 @@ Cancellation is not a failure; check `WasCancelled` and return the user to where
 
 Authenticators and backends report a known failure by throwing `PasskeyException(category)`. `HttpRequestException` and timeouts become `NetworkFailure` and malformed JSON becomes `InvalidServerResponse`.
 
-A cancellation is `UserCancelled` only when the caller's token was cancelled or the authenticator reported it. A cancellation thrown by the backend while the caller's token is live (an aborted request, the backend's own timeout) is `NetworkFailure`, so a network fault never looks like the user's choice.
+A cancellation is `UserCancelled` only when the caller's token was cancelled or the authenticator reported it. A cancellation thrown by the backend while the caller's token is live (an aborted request, the backend's own timeout) is `NetworkFailure`, so a network fault never looks like the user's choice. Once the caller's token is cancelled, any failure of that operation is reported as cancelled, whatever the platform threw.
 
 ### Branding
 
