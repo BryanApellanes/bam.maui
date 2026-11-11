@@ -16,6 +16,9 @@ public sealed record PasskeyRegistrationRequest
 
     /// <summary>An invite code, when the backend's sign-up is invite-only.</summary>
     public string? InviteCode { get; init; }
+
+    /// <summary>Names the type only: the email is personal data and the invite code is a reusable credential, and neither belongs in a log.</summary>
+    public override string ToString() => nameof(PasskeyRegistrationRequest);
 }
 
 /// <summary>
@@ -40,6 +43,9 @@ public sealed record PasskeyAuthenticationChallenge
 
     /// <summary>An opaque value the backend uses to find its pending challenge at completion, when it issues one.</summary>
     public string? CeremonyId { get; init; }
+
+    /// <summary>Names the type only, so the ceremony id never lands in a log through string formatting.</summary>
+    public override string ToString() => nameof(PasskeyAuthenticationChallenge);
 }
 
 /// <summary>
@@ -54,7 +60,7 @@ public sealed record PasskeySignIn
     /// <summary>The account's display name, when the backend returned one.</summary>
     public string? DisplayName { get; init; }
 
-    /// <summary>Where the backend suggests the app go next, when it returned a suggestion.</summary>
+    /// <summary>Where the backend suggests the app go next, when it returned a suggestion.  Server-supplied: an app must check it is a relative path or on the relying party's own origin before navigating to it.</summary>
     public string? NextUrl { get; init; }
 }
 

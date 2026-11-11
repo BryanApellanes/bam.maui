@@ -11,7 +11,7 @@ Added
 - Configuration: `PasskeyConfiguration`, `PasskeyFeatures`, `PasskeyBranding`, `PasskeyMessages`, each with validation.
 - `UnsupportedPasskeyAuthenticator`, the default until a platform authenticator is registered.
 - Registration: `ServiceRegistry.AddPasskeyClient` and `IServiceCollection.AddBamPasskeys`.
-- `bam.maui.tests` (bam.test): 18 unit tests.
+- `bam.maui.tests` (bam.test): 22 unit tests.
 - A plain `net10.0` target, and a `bam.base` reference resolved through `$(BamFrameworkRoot)`.
 
 Changed
@@ -20,6 +20,14 @@ Changed
 
 Removed
 - The scaffold `Class1` and `PlatformClass1` files, and the unused `Microsoft.Maui.Controls.Compatibility` reference.
+
+Review round 1
+- A cancellation is `UserCancelled` only when the caller cancelled or the authenticator reported it; a backend cancellation with the caller's token live is `NetworkFailure`.
+- A capability probe cancelled by the caller rethrows instead of reporting "not supported".
+- `RelyingPartyId` must be a lowercase DNS host name; colours are matched to the end of the string.
+- `PasskeyRegistrationRequest` and `PasskeyAuthenticationChallenge` print only their type name.
+- Log content is pinned by tests; a logger that throws can't break a result; the inner exception's type name is logged.
+- Needs bam.base#42 (`Logger.BlockUntilEventQueueIsEmpty`) for the log tests.
 
 Decisions
 - Platform integrations are the library's own, behind `IPasskeyAuthenticator`. MAUI's Essentials passkey API needs .NET 11; bamtk is on .NET 10.

@@ -33,7 +33,7 @@ Until Phase 2 no platform authenticator ships, so `IsSupportedAsync` returns fal
 | Android | AndroidX Credential Manager | Phase 2 |
 | iOS 15+ | AuthenticationServices | Phase 2 |
 | Mac Catalyst 15+ | AuthenticationServices | Phase 2 |
-| Windows 10 1903+ | `webauthn.dll` | Phase 2 |
+| Windows 10 1903+ | `webauthn.dll` | Phase 2. The library loads on 1809, the MAUI minimum, and will report passkeys as not supported there |
 | Tizen | None | Not targeted; reports not supported |
 
 MAUI's own passkey API in Essentials arrives with .NET 11. bamtk is on .NET 10 / MAUI 10.0.20, which doesn't have it, so the platform integrations sit behind `IPasskeyAuthenticator`. An Essentials-backed authenticator can be added as one more implementation later.
@@ -103,7 +103,7 @@ else if (!result.WasCancelled)
 | `GetRegisteredPasskeysAsync()`, `DeletePasskeyAsync(id)` | Manage the signed-in account's passkeys |
 | `GetPasskeyStatusAsync()` | Capabilities plus the passkey count when it can be read |
 
-No method throws for an expected failure. Each returns a `PasskeyResult`.
+No ceremony or management method throws for an expected failure. Each returns a `PasskeyResult`. The three probes (`IsSupportedAsync`, `GetCapabilitiesAsync`, `GetPasskeyStatusAsync`) throw `OperationCanceledException` when the caller cancels, and nothing else: a cancelled probe says nothing about the device, so it is never reported as "not supported".
 
 ### Errors
 
@@ -111,7 +111,9 @@ No method throws for an expected failure. Each returns a `PasskeyResult`.
 
 Cancellation is not a failure; check `WasCancelled` and return the user to where they were. The message on a `PasskeyError` always comes from `PasskeyMessages`, never from an exception. Replace its members to reword or localize.
 
-Authenticators and backends report a known failure by throwing `PasskeyException(category)`. `HttpRequestException` and timeouts become `NetworkFailure`, malformed JSON becomes `InvalidServerResponse`, `OperationCanceledException` becomes `UserCancelled`.
+Authenticators and backends report a known failure by throwing `PasskeyException(category)`. `HttpRequestException` and timeouts become `NetworkFailure` and malformed JSON becomes `InvalidServerResponse`.
+
+A cancellation is `UserCancelled` only when the caller's token was cancelled or the authenticator reported it. A cancellation thrown by the backend while the caller's token is live (an aborted request, the backend's own timeout) is `NetworkFailure`, so a network fault never looks like the user's choice.
 
 ### Branding
 
@@ -122,21 +124,23 @@ Authenticators and backends report a known failure by throwing `PasskeyException
 - The app verifies nothing. A ceremony has succeeded only when the backend's complete call returns, and the signed-in identity is taken from the backend's answer, never from what the user typed. A completion that names no account is treated as a failure.
 - Challenges are generated, expired and consumed by the backend. The library holds one only for the length of a ceremony.
 - Private keys and biometric data never reach the app; the platform APIs don't expose them.
-- Nothing sensitive is logged. Failures are logged by operation, category and exception type. Exception messages and WebAuthn payloads are not, and the payload wrappers print only their type name.
+- Nothing sensitive is logged. Failures are logged by operation, category and exception type names. Exception messages and WebAuthn payloads are not. The payload wrappers, the registration request (email, invite code) and the authentication challenge (ceremony id) print only their type name. Tests pin all of this.
+- `PasskeyFeatures` switches decide what the app offers. They are not access control; the backend enforces what an account may do.
+- `PasskeySignIn.NextUrl` is whatever the backend sent. Check it is a relative path or on the relying party's origin before navigating to it.
 - Native apps need the relying-party domain to vouch for them: Digital Asset Links for Android, Associated Domains for Apple. Android also presents an `android:apk-key-hash:` origin the server must allow. Server-side work for both is tracked in BryanApellanes/bam.useraccounts#12 and #13; the per-platform setup steps land with Phase 2.
 
 ### Tests
 
-`bam.maui.tests` uses bam.test with hand-written fakes for the backend and the authenticator. No test needs biometric hardware.
+`bam.maui.tests` uses bam.test with hand-written fakes for the backend and the authenticator. No test needs biometric hardware. The projects reference the framework through `$(BamFrameworkRoot)`, so build them with `bam.maui` checked out inside bamtk (`submodules/bam.maui`).
 
 ```bash
 dotnet build bam.maui.tests/bam.maui.tests.csproj -c Release
 BAM_ARG_STYLE=Posix dotnet run --project bam.maui.tests/bam.maui.tests.csproj -c Release --no-build -- --ut
 ```
 
-Suites: `pkcf` configuration, branding, capabilities and payload wrappers; `pken` error normalization; `pksv` service orchestration, cancellation, feature switches and management; `pkrg` registration.
+Suites: `pkcf` configuration, branding, capabilities and what the models print; `pken` error normalization; `pkcl` client orchestration, cancellation, feature switches and management; `pkdg` where a cancellation came from, and what reaches the log; `pkrg` registration.
 
 ### Dependencies
 
 - `Microsoft.Maui.Controls` 10.0.20
-- `bam.base` (`ServiceRegistry`, `Bam.Logging.ILogger`)
+- `bam.base` (`ServiceRegistry`, `Bam.Logging.ILogger`), which brings `Newtonsoft.Json`; the error normalizer recognises its exceptions

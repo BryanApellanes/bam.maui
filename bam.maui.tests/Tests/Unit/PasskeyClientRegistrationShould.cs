@@ -21,10 +21,10 @@ public class PasskeyClientRegistrationShould : UnitTestMenuContainer
             registry.For<IPasskeyBackend>().Use(new FakePasskeyBackend(log));
             PasskeyConfiguration configuration = PasskeyClientFixture.ValidConfiguration();
             registry.AddPasskeyClient(configuration);
-            IPasskeyClient service = registry.Get<IPasskeyClient>();
-            PasskeyResult<PasskeySignIn> signIn = service.AuthenticateAsync().GetAwaiter().GetResult();
+            IPasskeyClient client = registry.Get<IPasskeyClient>();
+            PasskeyResult<PasskeySignIn> signIn = client.AuthenticateAsync().GetAwaiter().GetResult();
             return new BindingOutcome(
-                service is PasskeyClient,
+                client is PasskeyClient,
                 ReferenceEquals(registry.Get<PasskeyConfiguration>(), configuration),
                 registry.Get<IPasskeyAuthenticator>() is UnsupportedPasskeyAuthenticator,
                 registry.Get<PasskeyErrorNormalizer>() is not null,
@@ -34,7 +34,7 @@ public class PasskeyClientRegistrationShould : UnitTestMenuContainer
         .TheTest
         .ShouldPass<BindingOutcome>((because, outcome) =>
         {
-            because.ItsTrue("IPasskeyClient resolves to PasskeyClient", outcome.ServiceResolved);
+            because.ItsTrue("IPasskeyClient resolves to PasskeyClient", outcome.ClientResolved);
             because.ItsTrue("the configuration is the instance the host passed", outcome.SameConfiguration);
             because.ItsTrue("the authenticator defaults to the unsupported one", outcome.DefaultAuthenticator);
             because.ItsTrue("the normalizer resolves", outcome.NormalizerResolved);
@@ -130,9 +130,9 @@ public class PasskeyClientRegistrationShould : UnitTestMenuContainer
             ServiceCollection services = new ServiceCollection();
             services.AddBamPasskeys(registry, configuration);
             using ServiceProvider provider = services.BuildServiceProvider();
-            IPasskeyClient service = provider.GetRequiredService<IPasskeyClient>();
+            IPasskeyClient client = provider.GetRequiredService<IPasskeyClient>();
             return new BridgeOutcome(
-                service.AuthenticateAsync().GetAwaiter().GetResult().Succeeded,
+                client.AuthenticateAsync().GetAwaiter().GetResult().Succeeded,
                 ReferenceEquals(provider.GetRequiredService<PasskeyConfiguration>(), configuration),
                 provider.GetRequiredService<PasskeyBranding>().ApplicationName);
         })
@@ -147,7 +147,7 @@ public class PasskeyClientRegistrationShould : UnitTestMenuContainer
         .UnlessItFailed();
     }
 
-    private sealed record BindingOutcome(bool ServiceResolved, bool SameConfiguration, bool DefaultAuthenticator, bool NormalizerResolved, PasskeyErrorCategory? SignInCategory, int BackendCalls);
+    private sealed record BindingOutcome(bool ClientResolved, bool SameConfiguration, bool DefaultAuthenticator, bool NormalizerResolved, PasskeyErrorCategory? SignInCategory, int BackendCalls);
 
     private sealed record HostBindingOutcome(bool KeptHostAuthenticator, bool SignedInBefore, bool SignedInAfter);
 

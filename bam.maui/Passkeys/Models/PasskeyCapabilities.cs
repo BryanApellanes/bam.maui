@@ -30,7 +30,7 @@ public sealed record PasskeyCapabilities
     /// <summary>Whether a ceremony can run, and why not.</summary>
     public PasskeyAvailability Availability { get; init; } = PasskeyAvailability.NotSupported;
 
-    /// <summary>Whether username-less sign-in with discoverable credentials is possible.</summary>
+    /// <summary>Whether username-less sign-in with discoverable credentials is possible.  Advisory: apps use it to decide what to offer; <see cref="IPasskeyClient.AuthenticateAsync"/> does not gate on it and leaves the answer to the platform.</summary>
     public bool SupportsDiscoverableCredentials { get; init; }
 
     /// <summary>Whether external FIDO2 security keys can be used.</summary>

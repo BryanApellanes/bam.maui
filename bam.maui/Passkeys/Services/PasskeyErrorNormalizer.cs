@@ -29,7 +29,8 @@ public sealed class PasskeyErrorNormalizer
 
     /// <summary>
     /// The error for an exception.  <see cref="PasskeyException"/> keeps its category; cancellation
-    /// becomes <see cref="PasskeyErrorCategory.UserCancelled"/>; transport faults and timeouts
+    /// becomes <see cref="PasskeyErrorCategory.UserCancelled"/> (<see cref="PasskeyClient"/> turns a
+    /// backend cancellation the caller did not ask for into a network failure before it gets here); transport faults and timeouts
     /// become <see cref="PasskeyErrorCategory.NetworkFailure"/>; malformed data becomes
     /// <see cref="PasskeyErrorCategory.InvalidServerResponse"/>; anything else is
     /// <see cref="PasskeyErrorCategory.Unknown"/>.

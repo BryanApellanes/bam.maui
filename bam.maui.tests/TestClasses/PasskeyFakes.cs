@@ -31,6 +31,7 @@ public sealed class FakePasskeyBackend : IPasskeyBackend
     public PasskeySignIn? SignIn { get; set; } = new PasskeySignIn { Handle = "ada", DisplayName = "Ada" };
     public List<PasskeyCredential> Credentials { get; set; } = new List<PasskeyCredential>();
     public bool ReturnNullOptions { get; set; }
+    public Action<string>? BeforeCall { get; set; }
 
     public PasskeyRegistrationRequest? CompletedRegistration { get; private set; }
     public string? BegunHandle { get; private set; }
@@ -104,6 +105,7 @@ public sealed class FakePasskeyBackend : IPasskeyBackend
     private void Enter(string call)
     {
         _log.Add(call);
+        BeforeCall?.Invoke(call);
         if (Failures.TryGetValue(call, out Exception? failure))
         {
             throw failure;
@@ -129,6 +131,7 @@ public sealed class FakePasskeyAuthenticator : IPasskeyAuthenticator
     };
 
     public Exception? CapabilitiesFailure { get; set; }
+    public Func<CancellationToken, Task<PasskeyCapabilities>>? CapabilitiesProbe { get; set; }
     public Exception? CreateFailure { get; set; }
     public Exception? AssertFailure { get; set; }
     public string? CreatedWithJson { get; private set; }
@@ -139,6 +142,10 @@ public sealed class FakePasskeyAuthenticator : IPasskeyAuthenticator
         if (CapabilitiesFailure is not null)
         {
             throw CapabilitiesFailure;
+        }
+        if (CapabilitiesProbe is not null)
+        {
+            return CapabilitiesProbe(cancellationToken);
         }
         return Task.FromResult(Capabilities);
     }
@@ -166,7 +173,7 @@ public sealed class FakePasskeyAuthenticator : IPasskeyAuthenticator
     }
 }
 
-/// <summary>Everything a service test needs, wired together.</summary>
+/// <summary>Everything a client test needs, wired together.</summary>
 public sealed class PasskeyClientFixture
 {
     public PasskeyClientFixture()
@@ -182,7 +189,7 @@ public sealed class PasskeyClientFixture
     public FakePasskeyAuthenticator Authenticator { get; }
     public PasskeyConfiguration Configuration { get; }
 
-    public PasskeyClient Service()
+    public PasskeyClient Client()
     {
         return new PasskeyClient(Backend, Authenticator, Configuration, new PasskeyErrorNormalizer(Configuration.Messages));
     }

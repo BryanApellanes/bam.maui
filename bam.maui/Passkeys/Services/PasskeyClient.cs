@@ -10,7 +10,14 @@ namespace Bam.Maui.Passkeys;
 /// <para>
 /// Every exception from either collaborator is caught and returned as a failed
 /// <see cref="PasskeyResult"/>.  Failures are logged by operation, category and exception type
-/// only; exception messages and WebAuthn payloads are never logged.
+/// names only; exception messages and WebAuthn payloads are never logged.
+/// </para>
+/// <para>
+/// A cancellation is reported as <see cref="PasskeyErrorCategory.UserCancelled"/> only when the
+/// caller's token was cancelled or the authenticator reported it.  A cancellation thrown by the
+/// backend while the caller's token is live (an aborted request, the backend's own timeout) is a
+/// <see cref="PasskeyErrorCategory.NetworkFailure"/>, so a network fault never looks like the
+/// user's choice.
 /// </para>
 /// </summary>
 public sealed class PasskeyClient : IPasskeyClient
@@ -21,7 +28,7 @@ public sealed class PasskeyClient : IPasskeyClient
     private readonly PasskeyErrorNormalizer _normalizer;
     private readonly ILogger? _logger;
 
-    /// <summary>Creates the service.</summary>
+    /// <summary>Creates the client.</summary>
     /// <param name="backend">The relying-party server.</param>
     /// <param name="authenticator">The platform authenticator.</param>
     /// <param name="configuration">The app's passkey configuration; its feature switches gate each operation.</param>
@@ -52,8 +59,14 @@ public sealed class PasskeyClient : IPasskeyClient
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             PasskeyCapabilities? capabilities = await _authenticator.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
             return capabilities ?? PasskeyCapabilities.Unsupported();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // A cancelled probe says nothing about the device; reporting "not supported" here would hide passkeys on a device that has them.
+            throw;
         }
         catch (Exception exception)
         {
@@ -72,14 +85,14 @@ public sealed class PasskeyClient : IPasskeyClient
             {
                 throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "A registration request with a handle is required.");
             }
-            PasskeyRegistrationChallenge challenge = await _backend.BeginRegistrationAsync(request, token).ConfigureAwait(false);
+            PasskeyRegistrationChallenge challenge = await FromBackend(() => _backend.BeginRegistrationAsync(request, token), token).ConfigureAwait(false);
             if (challenge?.Options is null)
             {
                 throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend returned no creation options.");
             }
             WebAuthnRegistrationResponse response = Require(await _authenticator.CreateAsync(challenge.Options, token).ConfigureAwait(false));
             PasskeyRegistrationRequest completion = string.IsNullOrWhiteSpace(challenge.Handle) ? request : request with { Handle = challenge.Handle };
-            PasskeySignIn signIn = await _backend.CompleteRegistrationAsync(completion, response, token).ConfigureAwait(false);
+            PasskeySignIn signIn = await FromBackend(() => _backend.CompleteRegistrationAsync(completion, response, token), token).ConfigureAwait(false);
             return RequireSignIn(signIn);
         }, cancellationToken);
     }
@@ -89,13 +102,13 @@ public sealed class PasskeyClient : IPasskeyClient
     {
         PasskeyResult<bool> result = await RunAsync<bool>("additional registration", _configuration.Features.EnableManagement, true, async token =>
         {
-            WebAuthnCreationOptions options = await _backend.BeginAdditionalRegistrationAsync(token).ConfigureAwait(false);
+            WebAuthnCreationOptions options = await FromBackend(() => _backend.BeginAdditionalRegistrationAsync(token), token).ConfigureAwait(false);
             if (options is null)
             {
                 throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend returned no creation options.");
             }
             WebAuthnRegistrationResponse response = Require(await _authenticator.CreateAsync(options, token).ConfigureAwait(false));
-            await _backend.CompleteAdditionalRegistrationAsync(response, token).ConfigureAwait(false);
+            await FromBackend(() => Completed(_backend.CompleteAdditionalRegistrationAsync(response, token)), token).ConfigureAwait(false);
             return true;
         }, cancellationToken).ConfigureAwait(false);
         return WithoutValue(result);
@@ -126,7 +139,7 @@ public sealed class PasskeyClient : IPasskeyClient
     {
         return RunAsync<IReadOnlyList<PasskeyCredential>>("passkey listing", _configuration.Features.EnableManagement, false, async token =>
         {
-            IReadOnlyList<PasskeyCredential> credentials = await _backend.GetPasskeysAsync(token).ConfigureAwait(false);
+            IReadOnlyList<PasskeyCredential> credentials = await FromBackend(() => _backend.GetPasskeysAsync(token), token).ConfigureAwait(false);
             return credentials ?? throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend returned no credential list.");
         }, cancellationToken);
     }
@@ -140,7 +153,7 @@ public sealed class PasskeyClient : IPasskeyClient
             {
                 throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "A credential id is required.");
             }
-            await _backend.DeletePasskeyAsync(credentialId, token).ConfigureAwait(false);
+            await FromBackend(() => Completed(_backend.DeletePasskeyAsync(credentialId, token)), token).ConfigureAwait(false);
             return true;
         }, cancellationToken).ConfigureAwait(false);
         return WithoutValue(result);
@@ -154,6 +167,7 @@ public sealed class PasskeyClient : IPasskeyClient
         if (_configuration.Features.EnableManagement)
         {
             PasskeyResult<IReadOnlyList<PasskeyCredential>> listing = await GetRegisteredPasskeysAsync(cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             if (listing.Succeeded && listing.Value is not null)
             {
                 count = listing.Value.Count;
@@ -164,7 +178,7 @@ public sealed class PasskeyClient : IPasskeyClient
 
     private async Task<PasskeySignIn> SignInAsync(string? handle, CancellationToken cancellationToken)
     {
-        PasskeyAuthenticationChallenge challenge = await _backend.BeginAuthenticationAsync(handle, cancellationToken).ConfigureAwait(false);
+        PasskeyAuthenticationChallenge challenge = await FromBackend(() => _backend.BeginAuthenticationAsync(handle, cancellationToken), cancellationToken).ConfigureAwait(false);
         if (challenge?.Options is null)
         {
             throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend returned no request options.");
@@ -174,7 +188,7 @@ public sealed class PasskeyClient : IPasskeyClient
         {
             throw new PasskeyException(PasskeyErrorCategory.PlatformFailure, "The authenticator returned no assertion.");
         }
-        PasskeySignIn signIn = await _backend.CompleteAuthenticationAsync(challenge, response, cancellationToken).ConfigureAwait(false);
+        PasskeySignIn signIn = await FromBackend(() => _backend.CompleteAuthenticationAsync(challenge, response, cancellationToken), cancellationToken).ConfigureAwait(false);
         return RequireSignIn(signIn);
     }
 
@@ -189,6 +203,7 @@ public sealed class PasskeyClient : IPasskeyClient
             cancellationToken.ThrowIfCancellationRequested();
             if (needsAuthenticator)
             {
+                // Throws when the caller cancels during the probe, which lands in the catch below as UserCancelled.
                 PasskeyCapabilities capabilities = await GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
                 if (!capabilities.IsSupported)
                 {
@@ -204,6 +219,28 @@ public sealed class PasskeyClient : IPasskeyClient
             LogFailure(operation, error.Category, exception);
             return PasskeyResult<TValue>.Failure(error);
         }
+    }
+
+    /// <summary>
+    /// Awaits a backend call.  A cancellation the caller did not ask for is the transport giving
+    /// up, so it is rethrown as a network failure instead of being mistaken for the user's choice.
+    /// </summary>
+    private static async Task<TValue> FromBackend<TValue>(Func<Task<TValue>> call, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await call().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new PasskeyException(PasskeyErrorCategory.NetworkFailure, "The backend call was cancelled without the caller cancelling.", exception);
+        }
+    }
+
+    private static async Task<bool> Completed(Task task)
+    {
+        await task.ConfigureAwait(false);
+        return true;
     }
 
     private static WebAuthnRegistrationResponse Require(WebAuthnRegistrationResponse? response)
@@ -232,14 +269,22 @@ public sealed class PasskeyClient : IPasskeyClient
         {
             return;
         }
-        // Type name only: exception messages can carry server text or payload fragments.
-        if (category == PasskeyErrorCategory.UserCancelled)
+        try
         {
-            _logger.Info("Passkey {0} cancelled by the user.", operation);
+            // Type names only: exception messages can carry server text or payload fragments.
+            if (category == PasskeyErrorCategory.UserCancelled)
+            {
+                _logger.Info("Passkey {0} cancelled.", operation);
+            }
+            else
+            {
+                string cause = exception.InnerException is null ? "none" : exception.InnerException.GetType().Name;
+                _logger.Warning("Passkey {0} failed: category {1}, exception {2}, cause {3}.", operation, category.ToString(), exception.GetType().Name, cause);
+            }
         }
-        else
+        catch (Exception)
         {
-            _logger.Warning("Passkey {0} failed: category {1}, exception {2}.", operation, category.ToString(), exception.GetType().Name);
+            // A logger that throws must not turn a reported failure into an unhandled one.
         }
     }
 }

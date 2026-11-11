@@ -8,7 +8,7 @@ namespace Bam.Maui.Passkeys;
 public sealed class PasskeyMessages
 {
     /// <summary>Shown when the user dismissed the prompt.</summary>
-    public string UserCancelled { get; set; } = "Passkey sign-in was cancelled.";
+    public string UserCancelled { get; set; } = "That was cancelled.";
 
     /// <summary>Shown when the device holds no passkey that fits.</summary>
     public string NoCredentials { get; set; } = "No passkey for this account was found on this device.";

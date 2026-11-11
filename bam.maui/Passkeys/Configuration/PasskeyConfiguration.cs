@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Bam.Maui.Passkeys;
 
 /// <summary>
@@ -8,9 +10,12 @@ namespace Bam.Maui.Passkeys;
 /// </summary>
 public sealed class PasskeyConfiguration
 {
+    // Dot-separated LDH labels, each 1-63 characters and not starting or ending with a hyphen; 253 characters overall.
+    private static readonly Regex HostName = new Regex(@"\A(?=.{1,253}\z)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\z", RegexOptions.CultureInvariant);
+
     /// <summary>
     /// The relying-party id the app's passkeys belong to: a bare lowercase host name such as
-    /// <c>example.com</c>.  It must match the backend's RP id and the domain that serves the
+    /// <c>example.com</c> (an internationalized name in its punycode form).  It must match the backend's RP id and the domain that serves the
     /// app's association files (Digital Asset Links, Apple App Site Association).
     /// </summary>
     public string RelyingPartyId { get; set; } = string.Empty;
@@ -34,13 +39,10 @@ public sealed class PasskeyConfiguration
         {
             throw new ArgumentException("PasskeyConfiguration.RelyingPartyId is required.");
         }
-        if (RelyingPartyId.Contains('/') || RelyingPartyId.Contains(':') || RelyingPartyId.Contains(' '))
+        if (!HostName.IsMatch(RelyingPartyId))
         {
-            throw new ArgumentException($"PasskeyConfiguration.RelyingPartyId '{RelyingPartyId}' must be a bare host name without scheme, port or path.");
-        }
-        if (!string.Equals(RelyingPartyId, RelyingPartyId.ToLowerInvariant(), StringComparison.Ordinal))
-        {
-            throw new ArgumentException($"PasskeyConfiguration.RelyingPartyId '{RelyingPartyId}' must be lowercase.");
+            // The value is not echoed: it may hold control characters, which is one of the things being refused.
+            throw new ArgumentException("PasskeyConfiguration.RelyingPartyId must be a bare lowercase DNS host name (letters, digits and hyphens in dot-separated labels) with no scheme, port, path, whitespace or trailing dot.");
         }
         if (Features is null)
         {

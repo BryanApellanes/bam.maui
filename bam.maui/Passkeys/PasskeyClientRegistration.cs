@@ -39,7 +39,7 @@ public static class PasskeyClientRegistration
         {
             registry.For<IPasskeyAuthenticator>().UseSingleton<IPasskeyAuthenticator>(new UnsupportedPasskeyAuthenticator());
         }
-        registry.For<IPasskeyClient>().Use<IPasskeyClient>(resolver => CreateService(resolver, configuration, normalizer));
+        registry.For<IPasskeyClient>().Use<IPasskeyClient>(resolver => CreateClient(resolver, configuration, normalizer));
         return registry;
     }
 
@@ -65,7 +65,7 @@ public static class PasskeyClientRegistration
         return services;
     }
 
-    private static IPasskeyClient CreateService(ServiceRegistry registry, PasskeyConfiguration configuration, PasskeyErrorNormalizer normalizer)
+    private static IPasskeyClient CreateClient(ServiceRegistry registry, PasskeyConfiguration configuration, PasskeyErrorNormalizer normalizer)
     {
         if (!registry.Contains<IPasskeyBackend>())
         {

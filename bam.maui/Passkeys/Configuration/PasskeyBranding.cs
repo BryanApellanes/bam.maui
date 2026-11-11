@@ -29,7 +29,7 @@ public enum PasskeyThemeMode
 /// </summary>
 public sealed class PasskeyBranding
 {
-    private static readonly Regex HexColor = new Regex("^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$", RegexOptions.CultureInvariant);
+    private static readonly Regex HexColor = new Regex(@"\A#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})\z", RegexOptions.CultureInvariant);
 
     /// <summary>The product name shown on every screen. Required.</summary>
     public string ApplicationName { get; set; } = "Application";

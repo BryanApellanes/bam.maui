@@ -51,6 +51,8 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
                 ThrowsFor(c => c.RelyingPartyId = "https://example.com"),
                 ThrowsFor(c => c.RelyingPartyId = "example.com:8443"),
                 ThrowsFor(c => c.RelyingPartyId = "Example.com"),
+                MalformedRelyingPartyIdsAccepted(),
+                WellFormedRelyingPartyIdsRefused(),
                 ThrowsFor(c => c.Features = null!),
                 ThrowsFor(c => c.Branding = null!),
                 ThrowsFor(c => c.Messages = null!),
@@ -66,6 +68,8 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
             because.ItsTrue("an rp id with a scheme is refused", outcome.RpIdWithScheme);
             because.ItsTrue("an rp id with a port is refused", outcome.RpIdWithPort);
             because.ItsTrue("a mixed-case rp id is refused", outcome.RpIdMixedCase);
+            because.ItsTrue("no malformed rp id is accepted: " + outcome.MalformedAccepted, outcome.MalformedAccepted.Length == 0);
+            because.ItsTrue("no well-formed rp id is refused: " + outcome.WellFormedRefused, outcome.WellFormedRefused.Length == 0);
             because.ItsTrue("null features are refused", outcome.NullFeatures);
             because.ItsTrue("null branding is refused", outcome.NullBranding);
             because.ItsTrue("null messages are refused", outcome.NullMessages);
@@ -90,6 +94,7 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
                 BrandingThrows(b => b.ApplicationName = " "),
                 BrandingThrows(b => b.PrimaryColor = "blue"),
                 BrandingThrows(b => b.DarkTextColor = "#FFF"),
+                BrandingThrows(b => b.TextColor = "#FFFFFF\n"),
                 BrandingThrows(b => b.BackgroundColor = null!),
                 BrandingThrows(b => b.CornerRadius = -1),
                 BrandingThrows(b => b.CornerRadius = double.NaN),
@@ -103,6 +108,7 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
             because.ItsTrue("a blank application name is refused", outcome.BlankName);
             because.ItsTrue("a named colour is refused", outcome.NamedColour);
             because.ItsTrue("a three-digit hex colour is refused", outcome.ShortColour);
+            because.ItsTrue("a colour with a trailing newline is refused", outcome.ColourWithNewline);
             because.ItsTrue("a null colour is refused", outcome.NullColour);
             because.ItsTrue("a negative radius is refused", outcome.NegativeRadius);
             because.ItsTrue("a NaN radius is refused", outcome.NanRadius);
@@ -160,7 +166,10 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
                 PayloadThrows(() => new WebAuthnRegistrationResponse(null!)),
                 PayloadThrows(() => new WebAuthnAssertionResponse("\t")),
                 new WebAuthnCreationOptions("{\"challenge\":\"secret\"}").ToString(),
-                new WebAuthnAssertionResponse("{\"signature\":\"secret\"}").ToString());
+                new WebAuthnAssertionResponse("{\"signature\":\"secret\"}").ToString(),
+                new PasskeyRegistrationRequest { Handle = "ada", DisplayName = "Ada", Email = "secret@example.com", InviteCode = "secret-invite" }.ToString(),
+                new PasskeyAuthenticationChallenge { Options = new WebAuthnRequestOptions("{}"), CeremonyId = "secret-ceremony" }.ToString(),
+                new PasskeyRegistrationChallenge { Options = new WebAuthnCreationOptions("{\"challenge\":\"secret\"}"), Handle = "ada" }.ToString());
         })
         .TheTest
         .ShouldPass<PayloadOutcome>((because, outcome) =>
@@ -171,6 +180,9 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
             because.ItsTrue("a whitespace assertion response is refused", outcome.BlankAssertion);
             because.ItsTrue("creation options do not print their JSON", !outcome.CreationText.Contains("secret"));
             because.ItsTrue("an assertion response does not print its JSON", !outcome.AssertionText.Contains("secret"));
+            because.ItsTrue("a registration request prints neither email nor invite code", !outcome.RequestText.Contains("secret"));
+            because.ItsTrue("an authentication challenge does not print its ceremony id", !outcome.ChallengeText.Contains("secret"));
+            because.ItsTrue("a registration challenge does not print its options", !outcome.RegistrationChallengeText.Contains("secret"));
         })
         .SoBeHappy()
         .UnlessItFailed();
@@ -179,6 +191,23 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
     private static PasskeyErrorCategory Category(PasskeyAvailability availability)
     {
         return new PasskeyCapabilities { Availability = availability }.ToErrorCategory();
+    }
+
+    private static string MalformedRelyingPartyIdsAccepted()
+    {
+        string[] malformed =
+        {
+            "example.com\n", "exa\tmple.com", " example.com", "\u00A0example.com", "user@example.com", "*.example.com", "..", ".", "-",
+            "example..com", "example.com?x=1", "example.com#f", "example.com.", ".example.com", "-example.com", "example-.com",
+            "example.com/path", "exa mple.com", "ex_ample.com", new string('a', 64) + ".com", string.Join(".", Enumerable.Repeat("abcdefghi", 26))
+        };
+        return string.Join(" ", malformed.Where(id => !ThrowsFor(c => c.RelyingPartyId = id)).Select(id => "[" + id + "]"));
+    }
+
+    private static string WellFormedRelyingPartyIdsRefused()
+    {
+        string[] wellFormed = { "example.com", "app.example.com", "localhost", "xn--bcher-kva.example", "a-b.example.co.uk", "1example.com", new string('a', 63) + ".com" };
+        return string.Join(" ", wellFormed.Where(id => ThrowsFor(c => c.RelyingPartyId = id)));
     }
 
     private static bool ThrowsFor(Action<PasskeyConfiguration> mutate)
@@ -230,11 +259,11 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
 
     private sealed record DefaultsOutcome(bool Valid, bool Registration, bool Authentication, bool Management, bool UsernameLess, PasskeyThemeMode Theme, double Radius);
 
-    private sealed record RejectionOutcome(bool BlankRpId, bool RpIdWithScheme, bool RpIdWithPort, bool RpIdMixedCase, bool NullFeatures, bool NullBranding, bool NullMessages, bool NothingEnabled, bool UsernameLessWithoutAuthentication, bool RegistrationOnlyAccepted, bool BlankMessage);
+    private sealed record RejectionOutcome(bool BlankRpId, bool RpIdWithScheme, bool RpIdWithPort, bool RpIdMixedCase, string MalformedAccepted, string WellFormedRefused, bool NullFeatures, bool NullBranding, bool NullMessages, bool NothingEnabled, bool UsernameLessWithoutAuthentication, bool RegistrationOnlyAccepted, bool BlankMessage);
 
-    private sealed record BrandingOutcome(bool DefaultsValid, bool ArgbAccepted, bool BlankName, bool NamedColour, bool ShortColour, bool NullColour, bool NegativeRadius, bool NanRadius, bool OptionalValuesAccepted);
+    private sealed record BrandingOutcome(bool DefaultsValid, bool ArgbAccepted, bool BlankName, bool NamedColour, bool ShortColour, bool ColourWithNewline, bool NullColour, bool NegativeRadius, bool NanRadius, bool OptionalValuesAccepted);
 
     private sealed record CapabilityOutcome(bool DefaultSupported, PasskeyAvailability DefaultAvailability, PasskeyErrorCategory Available, bool AvailableSupported, PasskeyErrorCategory NotSupported, PasskeyErrorCategory OldOs, PasskeyErrorCategory MissingProvider, PasskeyErrorCategory NoDeviceSecurity, string Platform, bool UnsupportedAuthenticatorSupported);
 
-    private sealed record PayloadOutcome(bool BlankCreation, bool EmptyRequest, bool NullRegistration, bool BlankAssertion, string CreationText, string AssertionText);
+    private sealed record PayloadOutcome(bool BlankCreation, bool EmptyRequest, bool NullRegistration, bool BlankAssertion, string CreationText, string AssertionText, string RequestText, string ChallengeText, string RegistrationChallengeText);
 }
