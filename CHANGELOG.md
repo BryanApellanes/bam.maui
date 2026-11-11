@@ -5,7 +5,7 @@
 ### Phase 1: passkey foundation (bam.maui#2)
 
 Added
-- `Bam.Maui.Passkeys`: `IPasskeyService`, `IPasskeyAuthenticator`, `IPasskeyBackend` and the orchestrating `PasskeyService`.
+- `Bam.Maui.Passkeys`: `IPasskeyClient`, `IPasskeyAuthenticator`, `IPasskeyBackend` and the orchestrating `PasskeyClient`.
 - Models: WebAuthn JSON wrappers, registration request, challenges, `PasskeySignIn`, `PasskeyCredential`, `PasskeyCapabilities`, `PasskeyStatus`, `PasskeyResult`.
 - Errors: `PasskeyErrorCategory`, `PasskeyError`, `PasskeyException`, `PasskeyErrorNormalizer`.
 - Configuration: `PasskeyConfiguration`, `PasskeyFeatures`, `PasskeyBranding`, `PasskeyMessages`, each with validation.

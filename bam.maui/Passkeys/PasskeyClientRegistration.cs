@@ -7,18 +7,18 @@ namespace Bam.Maui.Passkeys;
 /// <summary>
 /// Registers the passkey client.  A host calls <see cref="AddPasskeyClient"/> on its bam
 /// <see cref="ServiceRegistry"/>, or <see cref="AddBamPasskeys"/> on the MAUI service collection
-/// to do that and make <see cref="IPasskeyService"/> injectable into pages and view models.
+/// to do that and make <see cref="IPasskeyClient"/> injectable into pages and view models.
 /// </summary>
 public static class PasskeyClientRegistration
 {
     /// <summary>
     /// Validates the configuration and binds it, the <see cref="PasskeyErrorNormalizer"/> and
-    /// <see cref="IPasskeyService"/> (<see cref="PasskeyService"/>).
+    /// <see cref="IPasskeyClient"/> (<see cref="PasskeyClient"/>).
     /// <para>
     /// <see cref="IPasskeyAuthenticator"/> is bound to <see cref="UnsupportedPasskeyAuthenticator"/>
     /// only when the host has not bound one, so a platform authenticator registered before or
     /// after this call wins.  <see cref="IPasskeyBackend"/> is the host's to bind and must be
-    /// bound by the time <see cref="IPasskeyService"/> is resolved.  A bound
+    /// bound by the time <see cref="IPasskeyClient"/> is resolved.  A bound
     /// <see cref="ILogger"/> is used for failure logging; without one nothing is logged.
     /// </para>
     /// </summary>
@@ -39,14 +39,14 @@ public static class PasskeyClientRegistration
         {
             registry.For<IPasskeyAuthenticator>().UseSingleton<IPasskeyAuthenticator>(new UnsupportedPasskeyAuthenticator());
         }
-        registry.For<IPasskeyService>().Use<IPasskeyService>(resolver => CreateService(resolver, configuration, normalizer));
+        registry.For<IPasskeyClient>().Use<IPasskeyClient>(resolver => CreateService(resolver, configuration, normalizer));
         return registry;
     }
 
     /// <summary>
     /// Runs <see cref="AddPasskeyClient"/> on the bam registry and bridges the result into the
     /// MAUI service collection: the configuration and branding as singletons, and
-    /// <see cref="IPasskeyService"/> resolved from the registry on each request, so nothing is
+    /// <see cref="IPasskeyClient"/> resolved from the registry on each request, so nothing is
     /// registered twice and the registry stays the single source of bindings.
     /// </summary>
     /// <param name="services">The MAUI app's service collection (<c>builder.Services</c>).</param>
@@ -61,17 +61,17 @@ public static class PasskeyClientRegistration
 
         services.AddSingleton(configuration);
         services.AddSingleton(configuration.Branding);
-        services.AddTransient<IPasskeyService>(_ => registry.Get<IPasskeyService>());
+        services.AddTransient<IPasskeyClient>(_ => registry.Get<IPasskeyClient>());
         return services;
     }
 
-    private static IPasskeyService CreateService(ServiceRegistry registry, PasskeyConfiguration configuration, PasskeyErrorNormalizer normalizer)
+    private static IPasskeyClient CreateService(ServiceRegistry registry, PasskeyConfiguration configuration, PasskeyErrorNormalizer normalizer)
     {
         if (!registry.Contains<IPasskeyBackend>())
         {
-            throw new InvalidOperationException("No IPasskeyBackend is registered. Bind the app's relying-party backend on the ServiceRegistry before resolving IPasskeyService.");
+            throw new InvalidOperationException("No IPasskeyBackend is registered. Bind the app's relying-party backend on the ServiceRegistry before resolving IPasskeyClient.");
         }
         ILogger? logger = registry.Contains<ILogger>() ? registry.Get<ILogger>() : null;
-        return new PasskeyService(registry.Get<IPasskeyBackend>(), registry.Get<IPasskeyAuthenticator>(), configuration, normalizer, logger);
+        return new PasskeyClient(registry.Get<IPasskeyBackend>(), registry.Get<IPasskeyAuthenticator>(), configuration, normalizer, logger);
     }
 }

@@ -5,16 +5,16 @@ using Bam.Test;
 
 namespace Bam.Maui.Tests.Unit;
 
-[UnitTestMenu("PasskeyService Should", Selector = "pksv")]
-public class PasskeyServiceShould : UnitTestMenuContainer
+[UnitTestMenu("PasskeyClient Should", Selector = "pksv")]
+public class PasskeyClientShould : UnitTestMenuContainer
 {
-    public PasskeyServiceShould(ServiceRegistry serviceRegistry) : base(serviceRegistry) { }
+    public PasskeyClientShould(ServiceRegistry serviceRegistry) : base(serviceRegistry) { }
 
     [UnitTest]
     public void RegisterThroughBackendAndAuthenticator()
     {
-        After.Setup(reg => reg.Set(new PasskeyServiceFixture()))
-        .When<PasskeyServiceFixture>("registers a passkey with a handle the backend normalizes", (fixture, reg) =>
+        After.Setup(reg => reg.Set(new PasskeyClientFixture()))
+        .When<PasskeyClientFixture>("registers a passkey with a handle the backend normalizes", (fixture, reg) =>
         {
             fixture.Backend.NormalizedHandle = "ada";
             PasskeyRegistrationRequest request = new PasskeyRegistrationRequest { Handle = "Ada", DisplayName = "Ada L", Email = "ada@example.com", InviteCode = "inv" };
@@ -48,8 +48,8 @@ public class PasskeyServiceShould : UnitTestMenuContainer
     [UnitTest]
     public void SignInWithAndWithoutUsername()
     {
-        After.Setup(reg => reg.Set(new PasskeyServiceFixture()))
-        .When<PasskeyServiceFixture>("signs in discoverably, then username-first", (fixture, reg) =>
+        After.Setup(reg => reg.Set(new PasskeyClientFixture()))
+        .When<PasskeyClientFixture>("signs in discoverably, then username-first", (fixture, reg) =>
         {
             PasskeyResult<PasskeySignIn> discoverable = Wait(fixture.Service().AuthenticateAsync());
             string? discoverableHandle = fixture.Backend.BegunHandle;
@@ -87,8 +87,8 @@ public class PasskeyServiceShould : UnitTestMenuContainer
     [UnitTest]
     public void TreatCancellationAsCancellation()
     {
-        After.Setup(reg => reg.Set(new PasskeyServiceFixture()))
-        .When<PasskeyServiceFixture>("has the user dismiss the prompt, then cancels the token up front", (fixture, reg) =>
+        After.Setup(reg => reg.Set(new PasskeyClientFixture()))
+        .When<PasskeyClientFixture>("has the user dismiss the prompt, then cancels the token up front", (fixture, reg) =>
         {
             fixture.Authenticator.AssertFailure = new PasskeyException(PasskeyErrorCategory.UserCancelled);
             PasskeyResult<PasskeySignIn> dismissed = Wait(fixture.Service().AuthenticateAsync());
@@ -125,8 +125,8 @@ public class PasskeyServiceShould : UnitTestMenuContainer
     [UnitTest]
     public void NormalizeCollaboratorFailures()
     {
-        After.Setup(reg => reg.Set(new PasskeyServiceFixture()))
-        .When<PasskeyServiceFixture>("fails at each step of a ceremony", (unused, reg) =>
+        After.Setup(reg => reg.Set(new PasskeyClientFixture()))
+        .When<PasskeyClientFixture>("fails at each step of a ceremony", (unused, reg) =>
         {
             return new FailureOutcome(
                 SignInFailure(f => f.Backend.Failures["backend.beginAuthentication"] = new HttpRequestException("offline")),
@@ -139,9 +139,9 @@ public class PasskeyServiceShould : UnitTestMenuContainer
                 SignInFailure(f => f.Backend.SignIn = new PasskeySignIn { Handle = " " }),
                 RegistrationFailure(f => f.Authenticator.CreateFailure = new PasskeyException(PasskeyErrorCategory.PlatformFailure)),
                 RegistrationFailure(f => f.Backend.ReturnNullOptions = true),
-                Wait(new PasskeyServiceFixture().Service().RegisterPasskeyAsync(new PasskeyRegistrationRequest { Handle = "" })).Error?.Category,
-                Wait(new PasskeyServiceFixture().Service().RegisterPasskeyAsync(null!)).Error?.Category,
-                Wait(new PasskeyServiceFixture().Service().AuthenticateWithUsernameAsync(" ")).Error?.Category,
+                Wait(new PasskeyClientFixture().Service().RegisterPasskeyAsync(new PasskeyRegistrationRequest { Handle = "" })).Error?.Category,
+                Wait(new PasskeyClientFixture().Service().RegisterPasskeyAsync(null!)).Error?.Category,
+                Wait(new PasskeyClientFixture().Service().AuthenticateWithUsernameAsync(" ")).Error?.Category,
                 SignInMessage(f => f.Authenticator.AssertFailure = new InvalidOperationException("native crash detail")));
         })
         .TheTest
@@ -169,12 +169,12 @@ public class PasskeyServiceShould : UnitTestMenuContainer
     [UnitTest]
     public void RefuseDisabledFeaturesAndUnsupportedDevices()
     {
-        After.Setup(reg => reg.Set(new PasskeyServiceFixture()))
-        .When<PasskeyServiceFixture>("runs each operation with its feature off, then on an unsupported device", (unused, reg) =>
+        After.Setup(reg => reg.Set(new PasskeyClientFixture()))
+        .When<PasskeyClientFixture>("runs each operation with its feature off, then on an unsupported device", (unused, reg) =>
         {
-            PasskeyServiceFixture off = new PasskeyServiceFixture();
+            PasskeyClientFixture off = new PasskeyClientFixture();
             off.Configuration.Features = new PasskeyFeatures { EnableRegistration = false, EnableAuthentication = false, EnableManagement = false, EnableUsernameLessAuthentication = false };
-            PasskeyService disabled = off.Service();
+            PasskeyClient disabled = off.Service();
             List<PasskeyErrorCategory?> categories = new List<PasskeyErrorCategory?>
             {
                 Wait(disabled.RegisterPasskeyAsync(new PasskeyRegistrationRequest { Handle = "ada" })).Error?.Category,
@@ -185,20 +185,20 @@ public class PasskeyServiceShould : UnitTestMenuContainer
                 Wait(disabled.DeletePasskeyAsync("id")).Error?.Category
             };
 
-            PasskeyServiceFixture usernameOnly = new PasskeyServiceFixture();
+            PasskeyClientFixture usernameOnly = new PasskeyClientFixture();
             usernameOnly.Configuration.Features.EnableUsernameLessAuthentication = false;
             PasskeyErrorCategory? usernameLessOff = Wait(usernameOnly.Service().AuthenticateAsync()).Error?.Category;
             bool usernameFirstStillWorks = Wait(usernameOnly.Service().AuthenticateWithUsernameAsync("ada")).Succeeded;
 
-            PasskeyServiceFixture noLock = new PasskeyServiceFixture();
+            PasskeyClientFixture noLock = new PasskeyClientFixture();
             noLock.Authenticator.Capabilities = new PasskeyCapabilities { Availability = PasskeyAvailability.DeviceSecurityNotConfigured };
             PasskeyErrorCategory? noLockCategory = Wait(noLock.Service().AuthenticateAsync()).Error?.Category;
 
-            PasskeyServiceFixture probeFails = new PasskeyServiceFixture();
+            PasskeyClientFixture probeFails = new PasskeyClientFixture();
             probeFails.Authenticator.CapabilitiesFailure = new InvalidOperationException("probe");
             PasskeyErrorCategory? probeCategory = Wait(probeFails.Service().RegisterPasskeyAsync(new PasskeyRegistrationRequest { Handle = "ada" })).Error?.Category;
 
-            PasskeyService unsupported = new PasskeyService(noLock.Backend, new UnsupportedPasskeyAuthenticator(), noLock.Configuration, new PasskeyErrorNormalizer(noLock.Configuration.Messages));
+            PasskeyClient unsupported = new PasskeyClient(noLock.Backend, new UnsupportedPasskeyAuthenticator(), noLock.Configuration, new PasskeyErrorNormalizer(noLock.Configuration.Messages));
             return new GateOutcome(
                 categories.All(c => c == PasskeyErrorCategory.FeatureDisabled),
                 off.Log.Calls.Count,
@@ -210,7 +210,7 @@ public class PasskeyServiceShould : UnitTestMenuContainer
                 Wait(probeFails.Service().IsSupportedAsync()),
                 Wait(unsupported.AuthenticateAsync()).Error?.Category,
                 Wait(unsupported.IsSupportedAsync()),
-                Wait(new PasskeyServiceFixture().Service().IsSupportedAsync()));
+                Wait(new PasskeyClientFixture().Service().IsSupportedAsync()));
         })
         .TheTest
         .ShouldPass<GateOutcome>((because, outcome) =>
@@ -234,15 +234,15 @@ public class PasskeyServiceShould : UnitTestMenuContainer
     [UnitTest]
     public void ManageRegisteredPasskeys()
     {
-        After.Setup(reg => reg.Set(new PasskeyServiceFixture()))
-        .When<PasskeyServiceFixture>("lists, adds and deletes passkeys and reads status", (fixture, reg) =>
+        After.Setup(reg => reg.Set(new PasskeyClientFixture()))
+        .When<PasskeyClientFixture>("lists, adds and deletes passkeys and reads status", (fixture, reg) =>
         {
             fixture.Backend.Credentials = new List<PasskeyCredential>
             {
                 new PasskeyCredential { CredentialId = "one", Name = "Phone", CreatedUtc = new DateTime(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc) },
                 new PasskeyCredential { CredentialId = "two" }
             };
-            PasskeyService service = fixture.Service();
+            PasskeyClient service = fixture.Service();
             PasskeyResult<IReadOnlyList<PasskeyCredential>> listing = Wait(service.GetRegisteredPasskeysAsync());
             PasskeyStatus status = Wait(service.GetPasskeyStatusAsync());
             fixture.Log.Calls.Clear();
@@ -255,7 +255,7 @@ public class PasskeyServiceShould : UnitTestMenuContainer
             PasskeyStatus offlineStatus = Wait(service.GetPasskeyStatusAsync());
             PasskeyResult<IReadOnlyList<PasskeyCredential>> offlineListing = Wait(service.GetRegisteredPasskeysAsync());
 
-            PasskeyServiceFixture unsupported = new PasskeyServiceFixture();
+            PasskeyClientFixture unsupported = new PasskeyClientFixture();
             unsupported.Authenticator.Capabilities = PasskeyCapabilities.Unsupported("Test");
             unsupported.Backend.Credentials = fixture.Backend.Credentials;
             PasskeyResult<IReadOnlyList<PasskeyCredential>> unsupportedListing = Wait(unsupported.Service().GetRegisteredPasskeysAsync());
@@ -293,23 +293,23 @@ public class PasskeyServiceShould : UnitTestMenuContainer
         .UnlessItFailed();
     }
 
-    private static PasskeyErrorCategory? SignInFailure(Action<PasskeyServiceFixture> arrange)
+    private static PasskeyErrorCategory? SignInFailure(Action<PasskeyClientFixture> arrange)
     {
-        PasskeyServiceFixture fixture = new PasskeyServiceFixture();
+        PasskeyClientFixture fixture = new PasskeyClientFixture();
         arrange(fixture);
         return Wait(fixture.Service().AuthenticateAsync()).Error?.Category;
     }
 
-    private static string? SignInMessage(Action<PasskeyServiceFixture> arrange)
+    private static string? SignInMessage(Action<PasskeyClientFixture> arrange)
     {
-        PasskeyServiceFixture fixture = new PasskeyServiceFixture();
+        PasskeyClientFixture fixture = new PasskeyClientFixture();
         arrange(fixture);
         return Wait(fixture.Service().AuthenticateAsync()).Error?.Message;
     }
 
-    private static PasskeyErrorCategory? RegistrationFailure(Action<PasskeyServiceFixture> arrange)
+    private static PasskeyErrorCategory? RegistrationFailure(Action<PasskeyClientFixture> arrange)
     {
-        PasskeyServiceFixture fixture = new PasskeyServiceFixture();
+        PasskeyClientFixture fixture = new PasskeyClientFixture();
         arrange(fixture);
         return Wait(fixture.Service().RegisterPasskeyAsync(new PasskeyRegistrationRequest { Handle = "ada", DisplayName = "Ada" })).Error?.Category;
     }

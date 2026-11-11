@@ -167,9 +167,9 @@ public sealed class FakePasskeyAuthenticator : IPasskeyAuthenticator
 }
 
 /// <summary>Everything a service test needs, wired together.</summary>
-public sealed class PasskeyServiceFixture
+public sealed class PasskeyClientFixture
 {
-    public PasskeyServiceFixture()
+    public PasskeyClientFixture()
     {
         Log = new CallLog();
         Backend = new FakePasskeyBackend(Log);
@@ -182,9 +182,9 @@ public sealed class PasskeyServiceFixture
     public FakePasskeyAuthenticator Authenticator { get; }
     public PasskeyConfiguration Configuration { get; }
 
-    public PasskeyService Service()
+    public PasskeyClient Service()
     {
-        return new PasskeyService(Backend, Authenticator, Configuration, new PasskeyErrorNormalizer(Configuration.Messages));
+        return new PasskeyClient(Backend, Authenticator, Configuration, new PasskeyErrorNormalizer(Configuration.Messages));
     }
 
     public static PasskeyConfiguration ValidConfiguration()

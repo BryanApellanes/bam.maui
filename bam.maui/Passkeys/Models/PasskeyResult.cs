@@ -1,7 +1,7 @@
 namespace Bam.Maui.Passkeys;
 
 /// <summary>
-/// The outcome of an <see cref="IPasskeyService"/> operation that returns no value.
+/// The outcome of an <see cref="IPasskeyClient"/> operation that returns no value.
 /// </summary>
 public class PasskeyResult
 {
@@ -39,7 +39,7 @@ public class PasskeyResult
 }
 
 /// <summary>
-/// The outcome of an <see cref="IPasskeyService"/> operation that returns a value.
+/// The outcome of an <see cref="IPasskeyClient"/> operation that returns a value.
 /// </summary>
 /// <typeparam name="TValue">The value produced on success.</typeparam>
 public sealed class PasskeyResult<TValue> : PasskeyResult

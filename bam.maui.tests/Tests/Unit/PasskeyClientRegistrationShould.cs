@@ -19,12 +19,12 @@ public class PasskeyClientRegistrationShould : UnitTestMenuContainer
         {
             ServiceRegistry registry = new ServiceRegistry();
             registry.For<IPasskeyBackend>().Use(new FakePasskeyBackend(log));
-            PasskeyConfiguration configuration = PasskeyServiceFixture.ValidConfiguration();
+            PasskeyConfiguration configuration = PasskeyClientFixture.ValidConfiguration();
             registry.AddPasskeyClient(configuration);
-            IPasskeyService service = registry.Get<IPasskeyService>();
+            IPasskeyClient service = registry.Get<IPasskeyClient>();
             PasskeyResult<PasskeySignIn> signIn = service.AuthenticateAsync().GetAwaiter().GetResult();
             return new BindingOutcome(
-                service is PasskeyService,
+                service is PasskeyClient,
                 ReferenceEquals(registry.Get<PasskeyConfiguration>(), configuration),
                 registry.Get<IPasskeyAuthenticator>() is UnsupportedPasskeyAuthenticator,
                 registry.Get<PasskeyErrorNormalizer>() is not null,
@@ -34,7 +34,7 @@ public class PasskeyClientRegistrationShould : UnitTestMenuContainer
         .TheTest
         .ShouldPass<BindingOutcome>((because, outcome) =>
         {
-            because.ItsTrue("IPasskeyService resolves to PasskeyService", outcome.ServiceResolved);
+            because.ItsTrue("IPasskeyClient resolves to PasskeyClient", outcome.ServiceResolved);
             because.ItsTrue("the configuration is the instance the host passed", outcome.SameConfiguration);
             because.ItsTrue("the authenticator defaults to the unsupported one", outcome.DefaultAuthenticator);
             because.ItsTrue("the normalizer resolves", outcome.NormalizerResolved);
@@ -54,14 +54,14 @@ public class PasskeyClientRegistrationShould : UnitTestMenuContainer
             ServiceRegistry before = new ServiceRegistry();
             before.For<IPasskeyBackend>().Use(new FakePasskeyBackend(log));
             before.For<IPasskeyAuthenticator>().Use(new FakePasskeyAuthenticator(log));
-            before.AddPasskeyClient(PasskeyServiceFixture.ValidConfiguration());
-            bool signedInBefore = before.Get<IPasskeyService>().AuthenticateAsync().GetAwaiter().GetResult().Succeeded;
+            before.AddPasskeyClient(PasskeyClientFixture.ValidConfiguration());
+            bool signedInBefore = before.Get<IPasskeyClient>().AuthenticateAsync().GetAwaiter().GetResult().Succeeded;
 
             ServiceRegistry after = new ServiceRegistry();
             after.For<IPasskeyBackend>().Use(new FakePasskeyBackend(log));
-            after.AddPasskeyClient(PasskeyServiceFixture.ValidConfiguration());
+            after.AddPasskeyClient(PasskeyClientFixture.ValidConfiguration());
             after.For<IPasskeyAuthenticator>().Use(new FakePasskeyAuthenticator(log));
-            bool signedInAfter = after.Get<IPasskeyService>().AuthenticateAsync().GetAwaiter().GetResult().Succeeded;
+            bool signedInAfter = after.Get<IPasskeyClient>().AuthenticateAsync().GetAwaiter().GetResult().Succeeded;
 
             return new HostBindingOutcome(before.Get<IPasskeyAuthenticator>() is FakePasskeyAuthenticator, signedInBefore, signedInAfter);
         })
@@ -93,11 +93,11 @@ public class PasskeyClientRegistrationShould : UnitTestMenuContainer
             }
 
             ServiceRegistry noBackend = new ServiceRegistry();
-            noBackend.AddPasskeyClient(PasskeyServiceFixture.ValidConfiguration());
+            noBackend.AddPasskeyClient(PasskeyClientFixture.ValidConfiguration());
             string? missingBackendMessage = null;
             try
             {
-                noBackend.Get<IPasskeyService>();
+                noBackend.Get<IPasskeyClient>();
             }
             catch (Exception exception)
             {
@@ -124,13 +124,13 @@ public class PasskeyClientRegistrationShould : UnitTestMenuContainer
             ServiceRegistry registry = new ServiceRegistry();
             registry.For<IPasskeyBackend>().Use(new FakePasskeyBackend(log));
             registry.For<IPasskeyAuthenticator>().Use(new FakePasskeyAuthenticator(log));
-            PasskeyConfiguration configuration = PasskeyServiceFixture.ValidConfiguration();
+            PasskeyConfiguration configuration = PasskeyClientFixture.ValidConfiguration();
             configuration.Branding.ApplicationName = "Bridge";
 
             ServiceCollection services = new ServiceCollection();
             services.AddBamPasskeys(registry, configuration);
             using ServiceProvider provider = services.BuildServiceProvider();
-            IPasskeyService service = provider.GetRequiredService<IPasskeyService>();
+            IPasskeyClient service = provider.GetRequiredService<IPasskeyClient>();
             return new BridgeOutcome(
                 service.AuthenticateAsync().GetAwaiter().GetResult().Succeeded,
                 ReferenceEquals(provider.GetRequiredService<PasskeyConfiguration>(), configuration),
@@ -139,7 +139,7 @@ public class PasskeyClientRegistrationShould : UnitTestMenuContainer
         .TheTest
         .ShouldPass<BridgeOutcome>((because, outcome) =>
         {
-            because.ItsTrue("IPasskeyService resolved from MS DI runs a ceremony through the registry's bindings", outcome.SignedIn);
+            because.ItsTrue("IPasskeyClient resolved from MS DI runs a ceremony through the registry's bindings", outcome.SignedIn);
             because.ItsTrue("the configuration is injectable", outcome.SameConfiguration);
             because.ItsTrue("the branding is injectable", outcome.ApplicationName == "Bridge");
         })

@@ -76,7 +76,7 @@ public sealed record PasskeyError
 
 /// <summary>
 /// Thrown by an <see cref="IPasskeyAuthenticator"/> or <see cref="IPasskeyBackend"/> to report a
-/// failure with a known category.  <see cref="IPasskeyService"/> catches it; apps normally see a
+/// failure with a known category.  <see cref="IPasskeyClient"/> catches it; apps normally see a
 /// <see cref="PasskeyError"/> instead.  The message is for diagnostics and is never shown to a user.
 /// </summary>
 public sealed class PasskeyException : Exception

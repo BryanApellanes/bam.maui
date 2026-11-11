@@ -13,7 +13,7 @@ namespace Bam.Maui.Passkeys;
 /// only; exception messages and WebAuthn payloads are never logged.
 /// </para>
 /// </summary>
-public sealed class PasskeyService : IPasskeyService
+public sealed class PasskeyClient : IPasskeyClient
 {
     private readonly IPasskeyBackend _backend;
     private readonly IPasskeyAuthenticator _authenticator;
@@ -27,7 +27,7 @@ public sealed class PasskeyService : IPasskeyService
     /// <param name="configuration">The app's passkey configuration; its feature switches gate each operation.</param>
     /// <param name="normalizer">Turns exceptions into user-safe errors.</param>
     /// <param name="logger">Where failures are recorded, or null to record nothing.</param>
-    public PasskeyService(IPasskeyBackend backend, IPasskeyAuthenticator authenticator, PasskeyConfiguration configuration, PasskeyErrorNormalizer normalizer, ILogger? logger = null)
+    public PasskeyClient(IPasskeyBackend backend, IPasskeyAuthenticator authenticator, PasskeyConfiguration configuration, PasskeyErrorNormalizer normalizer, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(backend);
         ArgumentNullException.ThrowIfNull(authenticator);

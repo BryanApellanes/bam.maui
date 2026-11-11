@@ -13,7 +13,7 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
     [UnitTest]
     public void AcceptCoherentConfiguration()
     {
-        After.Setup(reg => reg.Set(PasskeyServiceFixture.ValidConfiguration()))
+        After.Setup(reg => reg.Set(PasskeyClientFixture.ValidConfiguration()))
         .When<PasskeyConfiguration>("validates a valid configuration and reads its defaults", (configuration, reg) =>
         {
             return new DefaultsOutcome(
@@ -43,7 +43,7 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
     [UnitTest]
     public void RejectIncoherentConfiguration()
     {
-        After.Setup(reg => reg.Set(PasskeyServiceFixture.ValidConfiguration()))
+        After.Setup(reg => reg.Set(PasskeyClientFixture.ValidConfiguration()))
         .When<PasskeyConfiguration>("validates each broken variant", (unused, reg) =>
         {
             return new RejectionOutcome(
@@ -183,7 +183,7 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
 
     private static bool ThrowsFor(Action<PasskeyConfiguration> mutate)
     {
-        return Throws(PasskeyServiceFixture.ValidConfiguration(), mutate);
+        return Throws(PasskeyClientFixture.ValidConfiguration(), mutate);
     }
 
     private static bool Throws(PasskeyConfiguration configuration, Action<PasskeyConfiguration> mutate)

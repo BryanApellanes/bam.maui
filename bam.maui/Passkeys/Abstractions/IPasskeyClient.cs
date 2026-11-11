@@ -10,7 +10,7 @@ namespace Bam.Maui.Passkeys;
 /// <see cref="PasskeyError"/> carries a category and a message that is safe to show.
 /// </para>
 /// </summary>
-public interface IPasskeyService
+public interface IPasskeyClient
 {
     /// <summary>Whether a passkey ceremony can run on this device right now.  Never prompts.</summary>
     /// <param name="cancellationToken">Cancels the probe.</param>

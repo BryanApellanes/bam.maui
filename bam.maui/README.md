@@ -41,7 +41,7 @@ MAUI's own passkey API in Essentials arrives with .NET 11. bamtk is on .NET 10 /
 ### Architecture
 
 ```
-App ──> IPasskeyService (PasskeyService)
+App ──> IPasskeyClient (PasskeyClient)
             │  1. begin      ┌──> IPasskeyBackend        (relying-party server: challenges, verification, session)
             │  2. ceremony   └──> IPasskeyAuthenticator  (OS passkey API for the platform)
             │  3. complete   ───> IPasskeyBackend
@@ -75,7 +75,7 @@ PasskeyConfiguration configuration = new PasskeyConfiguration
 builder.Services.AddBamPasskeys(registry, configuration);          // in MauiProgram
 ```
 
-Then inject `IPasskeyService`:
+Then inject `IPasskeyClient`:
 
 ```csharp
 PasskeyResult<PasskeySignIn> result = await passkeys.AuthenticateAsync(cancellationToken);
