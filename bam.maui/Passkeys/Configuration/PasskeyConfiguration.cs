@@ -64,11 +64,20 @@ public sealed class PasskeyConfiguration
 
 internal static class PasskeyHostNames
 {
-    // A WebAuthn RP id is a domain, never an address: a name whose last label is all digits is an IPv4 address or a bare number.
+    // A WebAuthn RP id is a domain, never an address: a name whose last label is all digits is an IPv4 address or a bare
+    // number, and URL parsers read a last label of "0x" plus hex digits (or "0x" alone) as a number too.
     internal static bool LastLabelIsNumeric(string host)
     {
         string last = host.Substring(host.LastIndexOf('.') + 1);
-        return last.Length > 0 && last.All(char.IsAsciiDigit);
+        if (last.Length == 0)
+        {
+            return false;
+        }
+        if (last.All(char.IsAsciiDigit))
+        {
+            return true;
+        }
+        return last.StartsWith("0x", StringComparison.Ordinal) && last.Skip(2).All(char.IsAsciiHexDigit);
     }
 }
 

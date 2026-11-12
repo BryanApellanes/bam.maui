@@ -15,9 +15,9 @@ public static class PasskeyClientRegistration
     /// Validates the configuration and binds it, the <see cref="PasskeyErrorNormalizer"/> and
     /// <see cref="IPasskeyClient"/> (<see cref="PasskeyClient"/>).
     /// <para>
-    /// <see cref="IPasskeyAuthenticator"/> is bound to <see cref="UnsupportedPasskeyAuthenticator"/>
-    /// only when the host has not bound one, so a platform authenticator registered before or
-    /// after this call wins.  <see cref="IPasskeyBackend"/> is the host's to bind and must be
+    /// <see cref="IPasskeyAuthenticator"/> is bound to the platform's own authenticator
+    /// (<see cref="PasskeyPlatform.CreateAuthenticator"/>) only when the host has not bound one,
+    /// so an authenticator the host registers before or after this call wins.  <see cref="IPasskeyBackend"/> is the host's to bind and must be
     /// bound by the time <see cref="IPasskeyClient"/> is resolved.  A bound
     /// <see cref="ILogger"/> is used for failure logging; without one nothing is logged.
     /// </para>
@@ -37,7 +37,7 @@ public static class PasskeyClientRegistration
         registry.For<PasskeyErrorNormalizer>().UseSingleton(normalizer);
         if (!registry.Contains<IPasskeyAuthenticator>())
         {
-            registry.For<IPasskeyAuthenticator>().UseSingleton<IPasskeyAuthenticator>(new UnsupportedPasskeyAuthenticator());
+            registry.For<IPasskeyAuthenticator>().UseSingleton<IPasskeyAuthenticator>(PasskeyPlatform.CreateAuthenticator(configuration));
         }
         registry.For<IPasskeyClient>().Use<IPasskeyClient>(resolver => CreateClient(resolver, configuration, normalizer));
         return registry;
