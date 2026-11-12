@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Builds without the MAUI workload (bam.maui#12)
+
+Changed
+- `UseMaui` and `SingleProject` are set only when the platform targets are built. A `net10.0`-only build (inside `bamtk.sln`, or with `BamPlatformTargets=false`) restores on an SDK with no workloads.
+- `BamPlatformTargets=false` turns the platform targets off, as building inside `bamtk.sln` does. bamtest sets it for the projects it runs.
+
 ### Phase 2: native authenticators (bam.maui#4)
 
 Added
