@@ -173,9 +173,10 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     /// <inheritdoc />
     protected override void OnStateChanged()
     {
-        // A session found gone (the failure offers "sign in again") takes the account off the screen, so Back doesn't
-        // bring back a list nothing can act on.
-        if (State == PasskeyViewState.Failed && Recovery is { } plan && plan.Actions.Contains(PasskeyRecoveryAction.SignInAgain))
+        // A session found gone takes the account off the screen, so Back doesn't bring back a list nothing can act on.
+        // It is keyed on the error, not on the plan's buttons: an app that doesn't sign in with passkeys gets "try again"
+        // instead of "sign in again" for the same lost session.
+        if (State == PasskeyViewState.Failed && LastError is { Category: PasskeyErrorCategory.NotSignedIn })
         {
             ClearAccount();
         }
@@ -255,11 +256,22 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         return signOut.SignedOut ? SignedOutAsync(signOut) : LoadAsync();
     }
 
+    // The person asked to leave, and the client forgets the session however the call ends (IPasskeyClient.SignOutAsync),
+    // so a failed or cancelled sign-out still signs out here: the account leaves the screen and the app is told, with no
+    // next URL because the server didn't give one.
     private Task SignOutAsync()
     {
-        Editing = null;
-        PendingRemoval = null;
-        return RunAsync(token => Client.SignOutAsync(token), SignedOutAsync, workingText: Text.Updating);
+        ClearAccount();
+        return RunAsync(async token =>
+        {
+            PasskeyResult<PasskeySignOut> result = await Client.SignOutAsync(token);
+            if (result.Succeeded)
+            {
+                return result;
+            }
+            Logger?.Warning("Passkey {0} screen: sign-out failed ({1}); signed out on this device.", Flow.ToString(), result.Error!.Category.ToString());
+            return PasskeyResult<PasskeySignOut>.Success(new PasskeySignOut { SignedOut = true, NextUrl = null });
+        }, SignedOutAsync, workingText: Text.Updating);
     }
 
     // The session is over: nothing of the account stays on a screen the app may show again, so it is cleared before the

@@ -243,10 +243,13 @@ public class PasskeyManagementViewModelShould : UnitTestMenuContainer
             Wait(olderScreen.SignOutCommand.ExecuteAsync());
 
             client.SignOutResult = PasskeyResult<PasskeySignOut>.Failure(ScriptedPasskeyClient.Error(PasskeyErrorCategory.NetworkFailure));
-            PasskeyManagementViewModel offline = Screen(client, new FakePasskeyNavigator());
+            FakePasskeyNavigator offlineNavigator = new FakePasskeyNavigator();
+            PasskeyManagementViewModel offline = Screen(client, offlineNavigator);
             Wait(offline.LoadAsync());
             Wait(offline.SignOutCommand.ExecuteAsync());
-            return new SignOutOutcome(calls, navigator.Joined, navigator.SignedOut?.NextUrl, screen.Passkeys.Count, string.Join(",", older.Calls), Failed(offline));
+            OfflineShot offlineShot = new OfflineShot(offline.HasFailed, offline.State, offline.Passkeys.Count, offline.ShowsList, offline.ShowsEmptyState, offline.ShowsEditor,
+                offlineNavigator.Joined, offlineNavigator.SignedOut?.SignedOut, offlineNavigator.SignedOut?.NextUrl);
+            return new SignOutOutcome(calls, navigator.Joined, navigator.SignedOut?.NextUrl, screen.Passkeys.Count, string.Join(",", older.Calls), offlineShot);
         })
         .TheTest
         .ShouldPass<SignOutOutcome>((because, outcome) =>
@@ -256,7 +259,9 @@ public class PasskeyManagementViewModelShould : UnitTestMenuContainer
             because.ItsTrue("with where to go", outcome.NextUrl == "/account/signedout");
             because.ItsTrue("and clears the list", outcome.Left == 0);
             because.ItsTrue("an older navigator shows sign-in: " + outcome.OlderNavigation, outcome.OlderNavigation == "signIn");
-            because.ItsTrue("a failed sign-out shows why, with try again and back: " + outcome.Offline, outcome.Offline.Failed && outcome.Offline.TryAgain && outcome.Offline.Back);
+            because.ItsTrue("a sign-out that fails still signs out on this device, with no failure screen: " + outcome.Offline, !outcome.Offline.Failed && outcome.Offline.State == PasskeyViewState.Ready);
+            because.ItsTrue("the account leaves the screen", outcome.Offline.Count == 0 && !outcome.Offline.List && !outcome.Offline.Empty && !outcome.Offline.Editor);
+            because.ItsTrue("and the app is told, with no next URL: " + outcome.Offline, outcome.Offline.Navigation == "signedOut" && outcome.Offline.SignedOut == true && outcome.Offline.NextUrl is null);
         })
         .SoBeHappy()
         .UnlessItFailed();
@@ -295,7 +300,18 @@ public class PasskeyManagementViewModelShould : UnitTestMenuContainer
             int lostCount = lost.Passkeys.Count;
             Wait(lost.BackCommand.ExecuteAsync());
             ScreenShot lostBack = Shot(lost);
-            return new HandOffOutcome(during, after, failed, failedCount, back, lostShot, lostCount, lostBack, lost.ShowsEditor);
+
+            PasskeyConfiguration otherSignIn = PasskeyClientFixture.ValidConfiguration();
+            otherSignIn.Features.EnableAuthentication = false;
+            PasskeyManagementViewModel elsewhere = new PasskeyManagementViewModel(client, otherSignIn, new FakePasskeyNavigator());
+            Wait(elsewhere.LoadAsync());
+            Wait(elsewhere.Passkeys[0].RenameCommand.ExecuteAsync());
+            elsewhere.EditName = "Work";
+            Wait(elsewhere.SaveNameCommand.ExecuteAsync());
+            FailedShot elsewhereShot = Failed(elsewhere);
+            Wait(elsewhere.BackCommand.ExecuteAsync());
+            ScreenShot elsewhereBack = Shot(elsewhere);
+            return new HandOffOutcome(during, after, failed, failedCount, back, lostShot, lostCount, lostBack, lost.ShowsEditor, elsewhereShot, elsewhereBack, elsewhere.ShowsEditor);
         })
         .TheTest
         .ShouldPass<HandOffOutcome>((because, outcome) =>
@@ -311,6 +327,8 @@ public class PasskeyManagementViewModelShould : UnitTestMenuContainer
             because.ItsTrue("a session lost while renaming offers sign in again: " + outcome.Lost, outcome.Lost.Failed && outcome.Lost.SignInAgain);
             because.ItsTrue("and takes the list off the screen", outcome.LostCount == 0);
             because.ItsTrue("so Back finds no list or editor: " + outcome.LostBack, !outcome.LostBack.List && outcome.LostBack.Count == 0 && !outcome.LostEditor);
+            because.ItsTrue("an app that signs in another way gets try again for the lost session: " + outcome.Elsewhere, outcome.Elsewhere.Failed && !outcome.Elsewhere.SignInAgain && outcome.Elsewhere.TryAgain);
+            because.ItsTrue("and the list still leaves the screen: " + outcome.ElsewhereBack, !outcome.ElsewhereBack.List && outcome.ElsewhereBack.Count == 0 && !outcome.ElsewhereEditor);
         })
         .SoBeHappy()
         .UnlessItFailed();
@@ -355,9 +373,11 @@ public class PasskeyManagementViewModelShould : UnitTestMenuContainer
 
     private sealed record RemoveOutcome(bool AskedLaptop, bool Kept, FailedShot Last, string LastMessage, bool BackToList, string Warning, string? Deleted, string Navigation, string? NextUrl, ScreenShot After, bool Loaded);
 
-    private sealed record SignOutOutcome(string Calls, string Navigation, string? NextUrl, int Left, string OlderNavigation, FailedShot Offline);
+    private sealed record SignOutOutcome(string Calls, string Navigation, string? NextUrl, int Left, string OlderNavigation, OfflineShot Offline);
+
+    private sealed record OfflineShot(bool Failed, PasskeyViewState State, int Count, bool List, bool Empty, bool Editor, string Navigation, bool? SignedOut, string? NextUrl);
 
     private sealed record HandOffShot(bool SigningOut, bool Ready, int Count, string Title, string Line);
 
-    private sealed record HandOffOutcome(HandOffShot? During, HandOffShot After, FailedShot Failed, int FailedCount, ScreenShot Back, FailedShot Lost, int LostCount, ScreenShot LostBack, bool LostEditor);
+    private sealed record HandOffOutcome(HandOffShot? During, HandOffShot After, FailedShot Failed, int FailedCount, ScreenShot Back, FailedShot Lost, int LostCount, ScreenShot LostBack, bool LostEditor, FailedShot Elsewhere, ScreenShot ElsewhereBack, bool ElsewhereEditor);
 }

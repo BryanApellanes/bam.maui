@@ -73,7 +73,10 @@ public interface IPasskeyBackend
     /// <returns>A task that completes when the server has renamed it.</returns>
     Task RenamePasskeyAsync(string credentialId, string? name, CancellationToken cancellationToken = default);
 
-    /// <summary>Ends the session.</summary>
+    /// <summary>
+    /// Ends the session.  An implementation forgets the session it holds (a cookie, a token) however the call ends,
+    /// including when it throws, as <see cref="HttpPasskeyBackend"/> does with its cookie jar.
+    /// </summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>Whether a session ended, and where the server suggests going.</returns>
     Task<PasskeySignOut> SignOutAsync(CancellationToken cancellationToken = default);

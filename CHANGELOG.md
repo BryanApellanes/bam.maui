@@ -33,6 +33,12 @@ Review round 1 (bam.maui#19)
 - The README says the management page needs `EnableManagement`. With it off, the app signs out through `IPasskeyClient.SignOutAsync`.
 - 2 more unit tests (92 in all).
 
+Review round 2 (bam.maui#19)
+- A sign-out that fails signs out on the device anyway. The management screen clears the account before it calls sign-out, and on a failed result calls `SignedOutAsync` with `SignedOut` true and no next URL. The failure is logged by category. Before, the cookie was gone, but Back brought the list back and the app still thought the person was signed in. `IPasskeyClient.SignOutAsync` and `IPasskeyBackend.SignOutAsync` now say the session ends locally however the call ends.
+- The list leaves the screen on any `NotSignedIn` failure, keyed on the error (`PasskeyFlowViewModel.LastError`), not on whether "Sign in again" is offered. An app that doesn't sign in with passkeys kept the list and the open editor.
+- `PasskeyFlowViewModel.LastError` and `Logger` are protected members for derived screens.
+- The sign-out and lost-session tests cover both (92 in all).
+
 Decisions
 - Adding, renaming and removing stay behind `EnableManagement`. Sign-out and saving the profile don't: a signed-in person can always leave, and finish an account they already have.
 - The server's `ProfileNotSaved` maps to `Unknown`: the request was fine, so there is nothing for the user to change.

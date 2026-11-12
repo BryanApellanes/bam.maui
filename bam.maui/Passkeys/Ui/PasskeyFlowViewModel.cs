@@ -112,6 +112,15 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     /// <summary>Whether the ceremony failed.</summary>
     public bool HasFailed => State == PasskeyViewState.Failed;
 
+    /// <summary>
+    /// The error the screen last failed with, set before <see cref="State"/> becomes <see cref="PasskeyViewState.Failed"/>,
+    /// so <see cref="OnStateChanged"/> can act on its category whatever the recovery plan offers.  Null until a failure.
+    /// </summary>
+    protected PasskeyError? LastError { get; private set; }
+
+    /// <summary>Where the screen logs, or null.  Type and category names only, never a value.</summary>
+    protected ILogger? Logger => _logger;
+
     /// <summary>What to offer after a failure, or null.</summary>
     public PasskeyRecoveryPlan? Recovery
     {
@@ -401,6 +410,7 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     private void Fail(PasskeyError error, bool replacesForm, PasskeyFlow flow)
     {
         PasskeyRecoveryPlan plan = PasskeyRecovery.For(error, flow, Configuration, _typedInput, replacesForm);
+        LastError = error;
         if (plan.IsQuiet)
         {
             Recovery = null;

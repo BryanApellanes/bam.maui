@@ -72,7 +72,11 @@ public interface IPasskeyClient
     /// <returns>Success once the backend has renamed it.</returns>
     Task<PasskeyResult> RenamePasskeyAsync(string credentialId, string? name, CancellationToken cancellationToken = default);
 
-    /// <summary>Ends the session.  Not gated on a feature: a signed-in person can always leave.</summary>
+    /// <summary>
+    /// Ends the session.  Not gated on a feature: a signed-in person can always leave.  The session ends on this device
+    /// however the call ends: a failure says the server may not have heard (its session then lasts until it expires), not
+    /// that the person is still signed in here.  Callers treat a failed sign-out as signed out.
+    /// </summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>Whether a session ended, and where the backend suggests going.</returns>
     Task<PasskeyResult<PasskeySignOut>> SignOutAsync(CancellationToken cancellationToken = default);
