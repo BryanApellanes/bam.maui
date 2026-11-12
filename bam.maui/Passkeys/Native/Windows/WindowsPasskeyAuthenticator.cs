@@ -205,7 +205,8 @@ public sealed class WindowsPasskeyAuthenticator : PlatformPasskeyAuthenticator
             "none" => 1,
             "indirect" => 2,
             "direct" => 3,
-            _ => 0
+            // "enterprise" and anything unknown: ask for none rather than leaving it to Windows.
+            _ => 1
         };
     }
 

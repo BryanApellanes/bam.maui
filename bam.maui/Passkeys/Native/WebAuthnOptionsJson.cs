@@ -13,11 +13,16 @@ internal static class WebAuthnOptionsJson
     internal const int MaxCredentialDescriptors = 64;
     internal const int MaxCredentialIdLength = 1023;
 
+    private static readonly JsonDocumentOptions StrictOptions = new JsonDocumentOptions { AllowDuplicateProperties = false };
+
     internal static JsonDocument Open(string json, string what)
     {
         try
         {
-            JsonDocument document = JsonDocument.Parse(json);
+            // Duplicate members are refused: Android hands the raw JSON to Credential Manager, and a
+            // provider whose reader takes the first of two "rpId" members would act on a relying
+            // party this check never saw.
+            JsonDocument document = JsonDocument.Parse(json, StrictOptions);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
             {
                 document.Dispose();

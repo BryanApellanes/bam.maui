@@ -13,7 +13,7 @@ Added
 - `PasskeyPlatform.CreateAuthenticator`. `AddPasskeyClient` binds its result when the host has not bound an authenticator.
 - `bam.maui` and `bam.maui.tests` are in `bamtk.sln`.
 - Platform setup and manual verification steps in the README.
-- 14 unit tests (36 in all): suites `pkwj`, `pkwn`, `pkpe`.
+- 18 unit tests (40 in all): suites `pkwj`, `pkwn`, `pkpe`, `pkpc`.
 
 Changed
 - Inside `bamtk.sln` the library builds `net10.0` only; `-p:BamMauiPlatformTargets` overrides.
@@ -21,9 +21,16 @@ Changed
 - `RelyingPartyId` refuses a last label that is `0x` plus hex digits; URL parsers read it as a number.
 - The capability-probe test gives each probe its own client and a live token.
 
+Review round 1
+- Android: the caller's token ends a ceremony by itself (`PlatformCeremony`). Credential Manager does not have to call back once its signal is cancelled, so the ceremony no longer waits for a callback; a token that already fired never reaches Credential Manager.
+- Android: errors are mapped by the exception's `getType()` string (`AndroidPasskeyErrors.CategorizeType`), Credential Manager's stable contract. Java class names are only a fallback for an error that is not a Credential Manager exception; R8 can rename the classes in an app that shrinks.
+- Options with a duplicate member are refused as `InvalidOptions`. Android forwards the raw JSON, and a provider that kept the first of two `rpId` members would act on a relying party the check never saw.
+- An empty `pubKeyCredParams` means ES256 and RS256, as WebAuthn says, instead of being refused.
+- Windows asks for no attestation when the options ask for `enterprise` or an unknown value, instead of leaving the choice to Windows.
+
 Decisions
 - A platform timeout is `ExpiredChallenge`, never `UserCancelled`.
-- Android errors are mapped by Java class name. The binding passes the callback's exception as a plain Java object, and the name is what survives that.
+- Android errors are mapped by the exception's type string, not its C# type: the binding passes the callback's error as a plain Java object, so it is `JavaCast` to `CreateCredentialException` / `GetCredentialException` and its `Type` read. A DOM exception's type carries the DOM error's type after a `/`.
 - The Windows authenticator states the origin `https://<rp id>`. Windows does not verify it.
 - `Xamarin.AndroidX.Credentials` is pinned to 1.5.0.3, the newest version whose AndroidX dependencies agree with MAUI 10.0.20.
 

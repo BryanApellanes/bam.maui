@@ -184,14 +184,14 @@ Run these on each platform against a backend whose RP id matches the app's confi
 4. `AuthenticateWithUsernameAsync` signs in with that passkey.
 5. `AuthenticateAsync` (no username) offers the passkey and signs in.
 6. Dismiss the prompt: the result is `UserCancelled` and `WasCancelled` is true.
-7. Cancel the token while the prompt is up: the prompt closes and the result is `UserCancelled`.
+7. Cancel the token while the prompt is up: the result is `UserCancelled` at once, and the prompt closes. On Android the result does not wait for Credential Manager to call back.
 8. `AddPasskeyAsync` on a device that already holds a passkey for the account: `CredentialAlreadyRegistered` on Android and Windows. On Apple the backend refuses the duplicate instead, because the exclude list isn't passed there yet.
 9. Sign in with a username that has no passkey on the device: `NoCredentials` on Android and Windows.
 10. Point the app at options for another RP id: `InvalidOptions`, and no system prompt appears.
 11. Android only: break `assetlinks.json` and confirm the ceremony fails rather than succeeding.
 12. iOS only: remove the associated domain and confirm the ceremony fails with `PlatformFailure`.
 
-Known unknowns these steps settle: whether the Android binding hands the callback's exception over with its Java class intact (the error mapping depends on it), and whether the Apple sheet needs anything beyond the current view controller's window as its anchor.
+Known unknown these steps settle: whether the Apple sheet needs anything beyond the current view controller's window as its anchor. (Android errors are mapped by Credential Manager's type strings, which survive R8 renaming the exception classes; the Java class name is only a fallback.)
 
 ### Branding
 
@@ -205,7 +205,7 @@ Known unknowns these steps settle: whether the Android binding hands the callbac
 - Nothing sensitive is logged. Failures are logged by operation, category and exception type names. Exception messages and WebAuthn payloads are not. The payload wrappers, the registration request (email, invite code) and the authentication challenge (ceremony id) print only their type name. Tests pin all of this.
 - `PasskeyFeatures` switches decide what the app offers. They are not access control; the backend enforces what an account may do.
 - `PasskeySignIn.NextUrl` is whatever the backend sent. Check it is a relative path or on the relying party's origin before navigating to it.
-- Every platform authenticator refuses options whose `rp.id` (or `rpId`) is missing or is not the configured `RelyingPartyId`, before the platform is called. Options for another relying party never reach a prompt.
+- Every platform authenticator refuses options whose `rp.id` (or `rpId`) is missing or is not the configured `RelyingPartyId`, before the platform is called. Options for another relying party never reach a prompt. Options with a duplicate member are refused too, because Android hands the raw JSON to Credential Manager and a provider's reader may keep a different copy of `rpId` than the check saw.
 - Refusals never quote the options. A malformed challenge or a foreign RP id is named by member, not by value.
 - Native apps need the relying-party domain to vouch for them: Digital Asset Links for Android, Associated Domains for Apple. See [Platform setup](#platform-setup).
 - On Windows the app states its own origin and the OS doesn't verify it. A Windows passkey ceremony proves possession of the credential for the RP id; it doesn't prove which app asked.
@@ -219,7 +219,7 @@ dotnet build bam.maui.tests/bam.maui.tests.csproj -c Release
 BAM_ARG_STYLE=Posix dotnet run --project bam.maui.tests/bam.maui.tests.csproj -c Release --no-build -- --ut
 ```
 
-Suites: `pkcf` configuration, branding, capabilities and what the models print; `pken` error normalization; `pkcl` client orchestration, cancellation, feature switches and management; `pkdg` where a cancellation came from, and what reaches the log; `pkrg` registration; `pkwj` reading options and writing response JSON; `pkwn` the Windows authenticator and its interop layout; `pkpe` the Android, Apple and Windows error maps.
+Suites: `pkcf` configuration, branding, capabilities and what the models print; `pken` error normalization; `pkcl` client orchestration, cancellation, feature switches and management; `pkdg` where a cancellation came from, and what reaches the log; `pkrg` registration; `pkwj` reading options and writing response JSON; `pkwn` the Windows authenticator and its interop layout; `pkpe` the Android, Apple and Windows error maps; `pkpc` a callback ceremony ending from the caller's token.
 
 ### Dependencies
 

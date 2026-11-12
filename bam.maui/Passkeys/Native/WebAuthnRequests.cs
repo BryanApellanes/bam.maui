@@ -143,11 +143,19 @@ public sealed class WebAuthnCreationRequest
         };
     }
 
+    private const int EcdsaSha256 = -7;
+    private const int RsaSha256 = -257;
+
     private static IReadOnlyList<int> ReadAlgorithms(JsonElement root)
     {
         if (!root.TryGetProperty("pubKeyCredParams", out JsonElement list) || list.ValueKind != JsonValueKind.Array)
         {
             throw WebAuthnOptionsJson.Invalid("The options have no 'pubKeyCredParams' array.");
+        }
+        if (list.GetArrayLength() == 0)
+        {
+            // WebAuthn: an empty list means ES256 and RS256.
+            return new List<int> { EcdsaSha256, RsaSha256 };
         }
         List<int> algorithms = new List<int>();
         foreach (JsonElement item in list.EnumerateArray())

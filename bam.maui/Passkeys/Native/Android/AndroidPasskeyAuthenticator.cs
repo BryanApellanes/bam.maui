@@ -3,6 +3,7 @@ using Android.Content;
 using Android.OS;
 using AndroidX.Core.Content;
 using AndroidX.Credentials;
+using AndroidX.Credentials.Exceptions;
 using AndroidX.Credentials.Exceptions.PublicKeyCredential;
 using Java.Util.Concurrent;
 
@@ -67,12 +68,13 @@ public sealed class AndroidPasskeyAuthenticator : PlatformPasskeyAuthenticator
     {
         Activity activity = RequireActivity();
         using CancellationSignal signal = new CancellationSignal();
-        using CancellationTokenRegistration registration = cancellationToken.Register(signal.Cancel);
-        CeremonyCallback callback = new CeremonyCallback();
+        using PlatformCeremony<CeremonyOutcome> ceremony = new PlatformCeremony<CeremonyOutcome>(cancellationToken, signal.Cancel);
+        // A token that fired already never reaches Credential Manager.
+        cancellationToken.ThrowIfCancellationRequested();
         ICredentialManager manager = CredentialManager.Create(activity);
-        manager.CreateCredentialAsync(activity, new CreatePublicKeyCredentialRequest(options.Json), signal, MainExecutor(activity), callback);
+        manager.CreateCredentialAsync(activity, new CreatePublicKeyCredentialRequest(options.Json), signal, MainExecutor(activity), new CeremonyCallback(ceremony));
 
-        Java.Lang.Object? result = await Await(callback, true).ConfigureAwait(false);
+        Java.Lang.Object? result = await Await(ceremony, true).ConfigureAwait(false);
         CreatePublicKeyCredentialResponse? response = Cast<CreatePublicKeyCredentialResponse>(result);
         if (response is not null && !string.IsNullOrWhiteSpace(response.RegistrationResponseJson))
         {
@@ -86,13 +88,13 @@ public sealed class AndroidPasskeyAuthenticator : PlatformPasskeyAuthenticator
     {
         Activity activity = RequireActivity();
         using CancellationSignal signal = new CancellationSignal();
-        using CancellationTokenRegistration registration = cancellationToken.Register(signal.Cancel);
-        CeremonyCallback callback = new CeremonyCallback();
+        using PlatformCeremony<CeremonyOutcome> ceremony = new PlatformCeremony<CeremonyOutcome>(cancellationToken, signal.Cancel);
+        cancellationToken.ThrowIfCancellationRequested();
         List<CredentialOption> credentialOptions = new List<CredentialOption> { new GetPublicKeyCredentialOption(options.Json) };
         ICredentialManager manager = CredentialManager.Create(activity);
-        manager.GetCredentialAsync(activity, new GetCredentialRequest(credentialOptions), signal, MainExecutor(activity), callback);
+        manager.GetCredentialAsync(activity, new GetCredentialRequest(credentialOptions), signal, MainExecutor(activity), new CeremonyCallback(ceremony));
 
-        Java.Lang.Object? result = await Await(callback, false).ConfigureAwait(false);
+        Java.Lang.Object? result = await Await(ceremony, false).ConfigureAwait(false);
         PublicKeyCredential? credential = Cast<PublicKeyCredential>(Cast<GetCredentialResponse>(result)?.Credential);
         if (credential is not null && !string.IsNullOrWhiteSpace(credential.AuthenticationResponseJson))
         {
@@ -101,21 +103,54 @@ public sealed class AndroidPasskeyAuthenticator : PlatformPasskeyAuthenticator
         throw new PasskeyException(PasskeyErrorCategory.PlatformFailure, "Credential Manager returned no public key credential.");
     }
 
-    private static async Task<Java.Lang.Object?> Await(CeremonyCallback callback, bool creating)
+    private static async Task<Java.Lang.Object?> Await(PlatformCeremony<CeremonyOutcome> ceremony, bool creating)
     {
-        CeremonyOutcome outcome = await callback.Completion.ConfigureAwait(false);
+        // Throws OperationCanceledException when the caller's token fired first.
+        CeremonyOutcome outcome = await ceremony.Completion.ConfigureAwait(false);
         if (!outcome.Failed)
         {
             return outcome.Value;
         }
-        // Java class names only: the exception's message can quote the request.
-        string? exceptionClass = outcome.Value?.Class?.Name;
-        string? domErrorClass = DomErrorClassOf(outcome.Value, exceptionClass);
-        PasskeyErrorCategory category = AndroidPasskeyErrors.Categorize(exceptionClass, domErrorClass);
-        throw new PasskeyException(category, $"Credential Manager reported {exceptionClass ?? "an unknown error"} ({domErrorClass ?? "no DOM error"}) while {(creating ? "creating a passkey" : "signing in")}.");
+        // The exception's type string is Credential Manager's stable contract (the class name is
+        // the app's R8 settings' to change).  The class name is only a fallback for an error that
+        // is not a Credential Manager exception.  Never the message: it can quote the request.
+        string? errorType = ErrorTypeOf(outcome.Value, creating);
+        PasskeyErrorCategory category;
+        string reported;
+        if (errorType is not null)
+        {
+            category = AndroidPasskeyErrors.CategorizeType(errorType);
+            reported = AndroidPasskeyErrors.Printable(errorType);
+        }
+        else
+        {
+            string? exceptionClass = outcome.Value?.Class?.Name;
+            category = AndroidPasskeyErrors.Categorize(exceptionClass, DomErrorClassOf(outcome.Value, exceptionClass));
+            reported = exceptionClass ?? "an unknown error";
+        }
+        throw new PasskeyException(category, $"Credential Manager reported {reported} while {(creating ? "creating a passkey" : "signing in")}.");
     }
 
-    // The callback's error arrives typed as a plain Java object, so it is cast to the DOM exception by its Java class.
+    // The callback's error arrives typed as a plain Java object; it is cast to the exception base the ceremony reports.
+    private static string? ErrorTypeOf(Java.Lang.Object? error, bool creating)
+    {
+        if (error is null)
+        {
+            return null;
+        }
+        try
+        {
+            return creating
+                ? Android.Runtime.Extensions.JavaCast<CreateCredentialException>(error)?.Type
+                : Android.Runtime.Extensions.JavaCast<GetCredentialException>(error)?.Type;
+        }
+        catch (Exception exception) when (exception is InvalidCastException or Java.Lang.ClassCastException)
+        {
+            return null;
+        }
+    }
+
+    // Fallback only: casts to the DOM exception by its Java class.
     private static string? DomErrorClassOf(Java.Lang.Object? error, string? exceptionClass)
     {
         if (error is null)
@@ -175,18 +210,21 @@ public sealed class AndroidPasskeyAuthenticator : PlatformPasskeyAuthenticator
 
     private sealed class CeremonyCallback : Java.Lang.Object, ICredentialManagerCallback
     {
-        private readonly TaskCompletionSource<CeremonyOutcome> _completion = new TaskCompletionSource<CeremonyOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly PlatformCeremony<CeremonyOutcome> _ceremony;
 
-        public Task<CeremonyOutcome> Completion => _completion.Task;
+        public CeremonyCallback(PlatformCeremony<CeremonyOutcome> ceremony)
+        {
+            _ceremony = ceremony;
+        }
 
         public void OnError(Java.Lang.Object e)
         {
-            _completion.TrySetResult(new CeremonyOutcome(true, e));
+            _ceremony.Report(new CeremonyOutcome(true, e));
         }
 
         public void OnResult(Java.Lang.Object? result)
         {
-            _completion.TrySetResult(new CeremonyOutcome(false, result));
+            _ceremony.Report(new CeremonyOutcome(false, result));
         }
     }
 }

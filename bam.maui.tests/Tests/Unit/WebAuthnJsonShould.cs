@@ -13,6 +13,25 @@ public class WebAuthnJsonShould : UnitTestMenuContainer
     public WebAuthnJsonShould(ServiceRegistry serviceRegistry) : base(serviceRegistry) { }
 
     [UnitTest]
+    public void TreatAnEmptyAlgorithmListAsTheDefaults()
+    {
+        After.Setup(reg => reg.Set(new CallLog()))
+        .When<CallLog>("parses options whose pubKeyCredParams is empty", (unused, reg) =>
+        {
+            string empty = "{\"rp\":{\"id\":\"example.com\"},\"user\":{\"id\":\"AQID\",\"name\":\"ada\"},\"challenge\":\"BAUG\",\"pubKeyCredParams\":[]}";
+            WebAuthnCreationRequest parsed = WebAuthnCreationRequest.Parse(new WebAuthnCreationOptions(empty), "example.com");
+            return string.Join(",", parsed.Algorithms);
+        })
+        .TheTest
+        .ShouldPass<string>((because, algorithms) =>
+        {
+            because.ItsTrue("an empty list means ES256 then RS256 (WebAuthn): " + algorithms, algorithms == "-7,-257");
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    [UnitTest]
     public void ReadCreationOptions()
     {
         After.Setup(reg => reg.Set(new CallLog()))
@@ -177,6 +196,10 @@ public class WebAuthnJsonShould : UnitTestMenuContainer
                 ["exclude entry without id"] = creation.Replace("{\"type\":\"public-key\",\"id\":\"vu8\"}", "{\"type\":\"public-key\"}"),
                 ["too many excluded"] = creation.Replace("{\"type\":\"public-key\",\"id\":\"vu8\"}", string.Join(",", Enumerable.Repeat("{\"type\":\"public-key\",\"id\":\"vu8\"}", 70))),
                 ["text transports"] = creation.Replace("[\"internal\",\"hybrid\"]", "\"internal\""),
+                // Duplicate members: the parser would keep the last, a provider handed the raw JSON might keep the first.
+                ["duplicate rp"] = creation.Replace("\"rp\":{", "\"rp\":{\"id\":\"evil.example\"},\"rp\":{"),
+                ["duplicate rp.id"] = creation.Replace("\"rp\":{", "\"rp\":{\"id\":\"evil.example\","),
+                ["duplicate challenge"] = creation.Replace("\"challenge\":\"AAECA_v_\",", "\"challenge\":\"AAECA_v_\",\"challenge\":\"AAECA_v_\","),
             };
             List<string> accepted = new List<string>();
             List<string> leaked = new List<string>();
@@ -187,7 +210,7 @@ public class WebAuthnJsonShould : UnitTestMenuContainer
                     accepted.Add(variant.Key);
                 }
                 string message = CreationMessage(variant.Value);
-                if (message.Contains(secret, StringComparison.Ordinal) || message.Contains("AAEC", StringComparison.Ordinal))
+                if (message.Contains(secret, StringComparison.Ordinal) || message.Contains("AAEC", StringComparison.Ordinal) || message.Contains("evil", StringComparison.Ordinal))
                 {
                     leaked.Add(variant.Key);
                 }
@@ -199,6 +222,10 @@ public class WebAuthnJsonShould : UnitTestMenuContainer
             if (RequestCategory(request.Replace("\"allowCredentials\":[", "\"allowCredentials\":7,\"x\":[")) != PasskeyErrorCategory.InvalidOptions)
             {
                 accepted.Add("request allow list not an array");
+            }
+            if (RequestCategory(request.Replace("\"rpId\":\"example.com\"", "\"rpId\":\"evil.example\",\"rpId\":\"example.com\"")) != PasskeyErrorCategory.InvalidOptions)
+            {
+                accepted.Add("request with a duplicate rpId");
             }
             return new MalformedOutcome(creationVariants.Count, string.Join(", ", accepted), string.Join(", ", leaked));
         })

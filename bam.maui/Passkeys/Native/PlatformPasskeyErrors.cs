@@ -109,14 +109,118 @@ public static class ApplePasskeyErrors
 }
 
 /// <summary>
-/// Maps what Android's Credential Manager reports onto <see cref="PasskeyErrorCategory"/>, by the
-/// Java class name of the exception and, for a WebAuthn DOM exception, of the error it carries.
-/// Only Credential Manager's cancellation exceptions are <see cref="PasskeyErrorCategory.UserCancelled"/>;
-/// a WebAuthn <c>NotAllowedError</c> is not, because providers also use it for failures the user
-/// did not choose.
+/// Maps what Android's Credential Manager reports onto <see cref="PasskeyErrorCategory"/>.  The
+/// primary map is <see cref="CategorizeType"/>, over the exception's <c>getType()</c> string, which
+/// is Credential Manager's stable contract and survives R8 renaming the exception classes.
+/// <see cref="Categorize"/>, over Java class names, is the fallback for an error that is not a
+/// Credential Manager exception.  Only Credential Manager's cancellation is
+/// <see cref="PasskeyErrorCategory.UserCancelled"/>; a WebAuthn <c>NotAllowedError</c> is not,
+/// because providers also use it for failures the user did not choose.
 /// </summary>
 public static class AndroidPasskeyErrors
 {
+    /// <summary>The type of a registration the user cancelled.</summary>
+    public const string CreateCancelledType = "android.credentials.CreateCredentialException.TYPE_USER_CANCELED";
+
+    /// <summary>The type of a sign-in the user cancelled.</summary>
+    public const string GetCancelledType = "android.credentials.GetCredentialException.TYPE_USER_CANCELED";
+
+    /// <summary>The type of a sign-in with no matching credential.</summary>
+    public const string NoCredentialType = "android.credentials.GetCredentialException.TYPE_NO_CREDENTIAL";
+
+    /// <summary>The type of a registration no provider offered to store.</summary>
+    public const string NoCreateOptionsType = "android.credentials.CreateCredentialException.TYPE_NO_CREATE_OPTIONS";
+
+    /// <summary>The type of a registration with no provider configured.</summary>
+    public const string CreateProviderConfigurationType = "androidx.credentials.TYPE_CREATE_CREDENTIAL_PROVIDER_CONFIGURATION_EXCEPTION";
+
+    /// <summary>The type of a sign-in with no provider configured.</summary>
+    public const string GetProviderConfigurationType = "androidx.credentials.TYPE_GET_CREDENTIAL_PROVIDER_CONFIGURATION_EXCEPTION";
+
+    /// <summary>The type of a registration the device does not support.</summary>
+    public const string CreateUnsupportedType = "androidx.credentials.TYPE_CREATE_CREDENTIAL_UNSUPPORTED_EXCEPTION";
+
+    /// <summary>The type of a sign-in the device does not support.</summary>
+    public const string GetUnsupportedType = "androidx.credentials.TYPE_GET_CREDENTIAL_UNSUPPORTED_EXCEPTION";
+
+    /// <summary>The type of a registration's WebAuthn DOM exception; followed by <c>/</c> and the DOM error's type.</summary>
+    public const string CreateDomExceptionType = "androidx.credentials.TYPE_CREATE_PUBLIC_KEY_CREDENTIAL_DOM_EXCEPTION";
+
+    /// <summary>The type of a sign-in's WebAuthn DOM exception; followed by <c>/</c> and the DOM error's type.</summary>
+    public const string GetDomExceptionType = "androidx.credentials.TYPE_GET_PUBLIC_KEY_CREDENTIAL_DOM_EXCEPTION";
+
+    /// <summary>The prefix of every DOM error type.</summary>
+    public const string DomErrorTypePrefix = "androidx.credentials.TYPE_";
+
+    /// <summary>The category for a Credential Manager exception's <c>getType()</c>.</summary>
+    /// <param name="exceptionType">The exception's type string.</param>
+    /// <returns>The category; <see cref="PasskeyErrorCategory.PlatformFailure"/> for anything not listed.</returns>
+    public static PasskeyErrorCategory CategorizeType(string? exceptionType)
+    {
+        switch (exceptionType)
+        {
+            case CreateCancelledType:
+            case GetCancelledType:
+                return PasskeyErrorCategory.UserCancelled;
+            case NoCredentialType:
+                return PasskeyErrorCategory.NoCredentials;
+            case NoCreateOptionsType:
+            case CreateProviderConfigurationType:
+            case GetProviderConfigurationType:
+                return PasskeyErrorCategory.MissingCredentialProvider;
+            case CreateUnsupportedType:
+            case GetUnsupportedType:
+                return PasskeyErrorCategory.UnsupportedOperatingSystem;
+        }
+        if (exceptionType is null)
+        {
+            return PasskeyErrorCategory.PlatformFailure;
+        }
+        if (exceptionType.StartsWith(CreateDomExceptionType + "/", StringComparison.Ordinal))
+        {
+            string domErrorType = exceptionType.Substring(CreateDomExceptionType.Length + 1);
+            // InvalidStateError on creation is how WebAuthn says an excluded credential is already on the authenticator.
+            return domErrorType == DomErrorTypePrefix + "INVALID_STATE_ERROR" ? PasskeyErrorCategory.CredentialAlreadyRegistered : CategorizeDomErrorType(domErrorType);
+        }
+        if (exceptionType.StartsWith(GetDomExceptionType + "/", StringComparison.Ordinal))
+        {
+            return CategorizeDomErrorType(exceptionType.Substring(GetDomExceptionType.Length + 1));
+        }
+        return PasskeyErrorCategory.PlatformFailure;
+    }
+
+    /// <summary>
+    /// The type as it may appear in a diagnostic message: Credential Manager's own types as they
+    /// are, anything else (a provider's custom type) as "a custom type".
+    /// </summary>
+    /// <param name="exceptionType">The exception's type string.</param>
+    /// <returns>The printable form.</returns>
+    public static string Printable(string? exceptionType)
+    {
+        bool own = exceptionType is not null
+            && exceptionType.Length <= 160
+            && (exceptionType.StartsWith("android.credentials.", StringComparison.Ordinal) || exceptionType.StartsWith("androidx.credentials.", StringComparison.Ordinal))
+            && exceptionType.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '/');
+        return own ? exceptionType! : "a custom type";
+    }
+
+    private static PasskeyErrorCategory CategorizeDomErrorType(string domErrorType)
+    {
+        switch (domErrorType)
+        {
+            case DomErrorTypePrefix + "TIMEOUT_ERROR":
+                return PasskeyErrorCategory.ExpiredChallenge;
+            case DomErrorTypePrefix + "DATA_ERROR":
+            case DomErrorTypePrefix + "CONSTRAINT_ERROR":
+            case DomErrorTypePrefix + "NOT_SUPPORTED_ERROR":
+            case DomErrorTypePrefix + "SYNTAX_ERROR":
+            case DomErrorTypePrefix + "ENCODING_ERROR":
+                return PasskeyErrorCategory.InvalidOptions;
+            default:
+                return PasskeyErrorCategory.PlatformFailure;
+        }
+    }
+
     /// <summary>The Java package of Credential Manager's exceptions.</summary>
     public const string ExceptionPackage = "androidx.credentials.exceptions.";
 
@@ -129,7 +233,7 @@ public static class AndroidPasskeyErrors
     /// <summary>The Java class of the DOM exception a sign-in reports.</summary>
     public const string GetDomException = ExceptionPackage + "publickeycredential.GetPublicKeyCredentialDomException";
 
-    /// <summary>The category for an exception.</summary>
+    /// <summary>The fallback category for an exception, by Java class name; used only when the error is not a Credential Manager exception with a type.</summary>
     /// <param name="exceptionClassName">The Java class name of the exception passed to the callback.</param>
     /// <param name="domErrorClassName">The Java class name of its DOM error, when it is one of the two DOM exceptions.</param>
     /// <returns>The category; <see cref="PasskeyErrorCategory.PlatformFailure"/> for anything not listed.</returns>
