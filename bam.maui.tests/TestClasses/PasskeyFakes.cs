@@ -39,6 +39,13 @@ public sealed class FakePasskeyBackend : IPasskeyBackend
     public string? CompletedAssertionJson { get; private set; }
     public string? CompletedRegistrationJson { get; private set; }
     public string? DeletedCredentialId { get; private set; }
+    public string? AddedName { get; private set; }
+    public string AddedCredentialId { get; set; } = "added-1";
+    public PasskeySignOut DeleteResult { get; set; } = new PasskeySignOut { SignedOut = false };
+    public PasskeySignOut SignOutResult { get; set; } = new PasskeySignOut { SignedOut = true, NextUrl = "/account/signedout" };
+    public string? RenamedCredentialId { get; private set; }
+    public string? RenamedTo { get; private set; }
+    public PasskeyProfile? SavedProfile { get; private set; }
 
     public Task<PasskeyRegistrationChallenge> BeginRegistrationAsync(PasskeyRegistrationRequest request, CancellationToken cancellationToken = default)
     {
@@ -63,11 +70,12 @@ public sealed class FakePasskeyBackend : IPasskeyBackend
         return Task.FromResult(new WebAuthnCreationOptions("{\"challenge\":\"add\"}"));
     }
 
-    public Task CompleteAdditionalRegistrationAsync(WebAuthnRegistrationResponse response, CancellationToken cancellationToken = default)
+    public Task<string> CompleteAdditionalRegistrationAsync(WebAuthnRegistrationResponse response, string? name = null, CancellationToken cancellationToken = default)
     {
         Enter("backend.completeAdditional");
         CompletedRegistrationJson = response.Json;
-        return Task.CompletedTask;
+        AddedName = name;
+        return Task.FromResult(AddedCredentialId);
     }
 
     public Task<PasskeyAuthenticationChallenge> BeginAuthenticationAsync(string? handle, CancellationToken cancellationToken = default)
@@ -95,10 +103,31 @@ public sealed class FakePasskeyBackend : IPasskeyBackend
         return Task.FromResult(credentials);
     }
 
-    public Task DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
+    public Task<PasskeySignOut> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
     {
         Enter("backend.deletePasskey");
         DeletedCredentialId = credentialId;
+        return Task.FromResult(DeleteResult);
+    }
+
+    public Task RenamePasskeyAsync(string credentialId, string? name, CancellationToken cancellationToken = default)
+    {
+        Enter("backend.renamePasskey");
+        RenamedCredentialId = credentialId;
+        RenamedTo = name;
+        return Task.CompletedTask;
+    }
+
+    public Task<PasskeySignOut> SignOutAsync(CancellationToken cancellationToken = default)
+    {
+        Enter("backend.signOut");
+        return Task.FromResult(SignOutResult);
+    }
+
+    public Task SaveProfileAsync(PasskeyProfile profile, CancellationToken cancellationToken = default)
+    {
+        Enter("backend.saveProfile");
+        SavedProfile = profile;
         return Task.CompletedTask;
     }
 

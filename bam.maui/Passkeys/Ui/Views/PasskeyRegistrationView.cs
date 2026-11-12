@@ -65,6 +65,18 @@ public sealed class PasskeyRegistrationView : PasskeyScreenLayout
         PasskeyViewParts.ShowWhen(form, nameof(PasskeyFlowViewModel.IsReady));
 
         Label done = PasskeyViewParts.Heading(nameof(PasskeyRegistrationViewModel.SuccessTitle));
+
+        // Sign-up claimed the account but couldn't write its profile: offer to save what was typed.
+        VerticalStackLayout profile = new VerticalStackLayout { Spacing = 12 };
+        profile.Children.Add(PasskeyViewParts.Body(nameof(PasskeyRegistrationViewModel.ProfileMessage), PasskeyResourceKeys.Text));
+        profile.Children.Add(PasskeyViewParts.Field(text.DisplayNameLabel, nameof(PasskeyRegistrationViewModel.DisplayName), string.Empty, Keyboard.Text, true));
+        if (viewModel.AsksForEmail)
+        {
+            profile.Children.Add(PasskeyViewParts.Field(text.EmailLabel, nameof(PasskeyRegistrationViewModel.Email), string.Empty, Keyboard.Email, false));
+        }
+        profile.Children.Add(PasskeyViewParts.Secondary(text.Save, nameof(PasskeyRegistrationViewModel.SaveProfileCommand)));
+        PasskeyViewParts.ShowWhen(profile, nameof(PasskeyRegistrationViewModel.ShowsProfileStep));
+
         VerticalStackLayout success = new VerticalStackLayout
         {
             Spacing = 16,
@@ -72,6 +84,7 @@ public sealed class PasskeyRegistrationView : PasskeyScreenLayout
             {
                 done,
                 PasskeyViewParts.Body(nameof(PasskeyRegistrationViewModel.SuccessDetail)),
+                profile,
                 PasskeyViewParts.Primary(text.Done, nameof(PasskeyRegistrationViewModel.DoneCommand))
             }
         };

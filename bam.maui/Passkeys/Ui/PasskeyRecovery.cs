@@ -7,7 +7,13 @@ public enum PasskeyFlow
     SignIn = 0,
 
     /// <summary>Creating an account with its first passkey.</summary>
-    Registration
+    Registration,
+
+    /// <summary>Listing, adding, renaming and removing the signed-in account's passkeys, and signing out.</summary>
+    Management,
+
+    /// <summary>Saving the profile a sign-up couldn't write.</summary>
+    Profile
 }
 
 /// <summary>A way out of a failed ceremony that an error screen offers.</summary>
@@ -26,7 +32,10 @@ public enum PasskeyRecoveryAction
     CreateAccountInstead,
 
     /// <summary>Back to the form, with what the user typed kept, to change it.  Every failure screen offers it.</summary>
-    Back
+    Back,
+
+    /// <summary>The session has ended: to the sign-in screen.</summary>
+    SignInAgain
 }
 
 /// <summary>
@@ -68,7 +77,13 @@ public static class PasskeyRecovery
         ArgumentNullException.ThrowIfNull(error);
         ArgumentNullException.ThrowIfNull(configuration);
         PasskeyText text = configuration.Text;
-        string failedTitle = flow == PasskeyFlow.SignIn ? text.SignInFailedTitle : text.RegistrationFailedTitle;
+        string failedTitle = flow switch
+        {
+            PasskeyFlow.SignIn => text.SignInFailedTitle,
+            PasskeyFlow.Management => text.ManagementFailedTitle,
+            PasskeyFlow.Profile => text.ProfileFailedTitle,
+            _ => text.RegistrationFailedTitle
+        };
         List<PasskeyRecoveryAction> actions = new List<PasskeyRecoveryAction>();
         string title = failedTitle;
         string? hint = null;
@@ -95,6 +110,11 @@ public static class PasskeyRecovery
                 break;
             case PasskeyErrorCategory.CredentialAlreadyRegistered:
                 // This device already holds a passkey for the account: signing in is the way forward.
+                break;
+            case PasskeyErrorCategory.NotSignedIn when SignedInFlow(flow):
+                // The session is gone: the same call fails the same way.  Signing in again is the way forward, or, when
+                // this app doesn't sign in with passkeys, trying again once it has signed in another way.
+                actions.Add(configuration.Features.EnableAuthentication ? PasskeyRecoveryAction.SignInAgain : PasskeyRecoveryAction.TryAgain);
                 break;
             default:
                 if (!(typedInput && CausedByInput(error.Category, flow)))
@@ -139,6 +159,12 @@ public static class PasskeyRecovery
         return category == PasskeyErrorCategory.InvalidOptions
             || category == PasskeyErrorCategory.NoCredentials
             || (flow == PasskeyFlow.Registration && category == PasskeyErrorCategory.ServerVerificationFailed);
+    }
+
+    // The flows that need a session: management and the profile write.
+    private static bool SignedInFlow(PasskeyFlow flow)
+    {
+        return flow == PasskeyFlow.Management || flow == PasskeyFlow.Profile;
     }
 
     // A device that can't do passkeys at all can't sign in with one either.

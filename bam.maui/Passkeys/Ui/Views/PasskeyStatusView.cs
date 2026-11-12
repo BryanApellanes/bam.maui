@@ -37,7 +37,9 @@ public sealed class PasskeyStatusView : ContentView
         PasskeyViewParts.ShowWhen(signIn, nameof(PasskeyFlowViewModel.OffersSignInInstead));
         Button register = PasskeyViewParts.Secondary(text.CreateAccountInstead, nameof(PasskeyFlowViewModel.GoToRegistrationCommand));
         PasskeyViewParts.ShowWhen(register, nameof(PasskeyFlowViewModel.OffersCreateAccountInstead));
-        VerticalStackLayout failure = new VerticalStackLayout { Spacing = 16, Children = { title, message, hint, tryAgain, signIn, register } };
+        Button signInAgain = PasskeyViewParts.Primary(text.SignInAgain, nameof(PasskeyFlowViewModel.GoToSignInCommand));
+        PasskeyViewParts.ShowWhen(signInAgain, nameof(PasskeyFlowViewModel.OffersSignInAgain));
+        VerticalStackLayout failure = new VerticalStackLayout { Spacing = 16, Children = { title, message, hint, tryAgain, signInAgain, signIn, register } };
         if (alternativeLabel is not null)
         {
             Button another = PasskeyViewParts.Link(alternativeLabel, nameof(PasskeyFlowViewModel.UseAnotherWayCommand));

@@ -62,6 +62,13 @@ public sealed record PasskeySignIn
 
     /// <summary>Where the backend suggests the app go next, when it returned a suggestion.  Server-supplied: an app must check it is a relative path or on the relying party's own origin before navigating to it.</summary>
     public string? NextUrl { get; init; }
+
+    /// <summary>
+    /// False when sign-up claimed the account but the backend couldn't write its profile (name and email).  The app
+    /// should offer to save it (<see cref="IPasskeyClient.SaveProfileAsync"/>); the registration screen does.  True
+    /// otherwise, and whenever the backend doesn't say.
+    /// </summary>
+    public bool ProfileCreated { get; init; } = true;
 }
 
 /// <summary>
@@ -87,6 +94,39 @@ public sealed record PasskeyCredential
 
     /// <summary>Whether the passkey is synced to a credential provider, if the backend reported it.</summary>
     public bool? BackedUp { get; init; }
+
+    /// <summary>Whether this session was opened with the passkey, if the backend reported it.  Removing it signs this session out.</summary>
+    public bool? IsCurrent { get; init; }
+
+    /// <summary>Whether the passkey is the account's registered key set (its first passkey), if the backend reported it.</summary>
+    public bool? IsRegisteredKeySet { get; init; }
+}
+
+/// <summary>What a sign-out, or the removal of a passkey, did to the session.</summary>
+public sealed record PasskeySignOut
+{
+    /// <summary>Whether the session ended.  Removing a passkey ends the session only when the session was opened with it.</summary>
+    public bool SignedOut { get; init; }
+
+    /// <summary>
+    /// Where the backend suggests the app go next, or null.  Only a path on the relying party's site is kept, as for
+    /// <see cref="PasskeySignIn.NextUrl"/>.
+    /// </summary>
+    public string? NextUrl { get; init; }
+}
+
+/// <summary>The profile written for an account whose sign-up couldn't write one (<see cref="PasskeySignIn.ProfileCreated"/>).</summary>
+public sealed record PasskeyProfile
+{
+    /// <summary>The name to show for the account.</summary>
+    public string DisplayName { get; init; } = string.Empty;
+
+    /// <summary>The email address, or null.</summary>
+    public string? Email { get; init; }
+
+    /// <summary>Not the field values: an email address must not reach a log through string interpolation.</summary>
+    /// <returns>The type name.</returns>
+    public override string ToString() => nameof(PasskeyProfile);
 }
 
 /// <summary>

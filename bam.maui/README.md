@@ -12,7 +12,7 @@ Apps use it to register an account with a passkey, sign in (with or without a us
 
 ### Status
 
-Phases 1 to 4 of 7 are in place. Tracking issue: BryanApellanes/bam.maui#1.
+Phases 1 to 5 of 7 are in place. Tracking issue: BryanApellanes/bam.maui#1.
 
 | Phase | What | State |
 |---|---|---|
@@ -20,7 +20,7 @@ Phases 1 to 4 of 7 are in place. Tracking issue: BryanApellanes/bam.maui#1.
 | 2 | Native authenticators (Android, iOS, Mac Catalyst, Windows) | Done. Compiled and unit tested; no ceremony has been run on a device yet (see [Manual verification](#manual-verification)) |
 | 3 | HTTP backend for bam.useraccounts.web | Done. Tested against fake endpoints; not yet run against a live host |
 | 4 | White-label views and theming | Done. View models, recovery and theme unit tested; the views compile for every target but haven't been rendered on a device yet |
-| 5 | Passkey management UI | Not started |
+| 5 | Passkey management UI | Done. List, add, rename, remove, sign out and the profile step, unit tested through the view models; not yet rendered on a device |
 | 6 | Older Android, platform matrix | Not started |
 | 7 | Hardening, docs, sample app | Not started |
 
@@ -119,15 +119,20 @@ else if (!result.WasCancelled)
 | `BeginRegistrationAsync` | `POST passkey/registration/begin` `{ handle, displayName, email?, inviteCode? }` |
 | `CompleteRegistrationAsync` | `POST passkey/registration/complete`, the same fields plus `credential` |
 | `BeginAdditionalRegistrationAsync` | `POST passkey/additional/begin` `{}` |
-| `CompleteAdditionalRegistrationAsync` | `POST passkey/additional/complete` `{ credential }` |
+| `CompleteAdditionalRegistrationAsync` | `POST passkey/additional/complete` `{ credential, name? }`, returns the new `credentialId` |
 | `BeginAuthenticationAsync` | `POST passkey/assertion/begin` `{ handle? }` |
 | `CompleteAuthenticationAsync` | `POST passkey/assertion/complete` `{ ceremonyId, credential }` |
-| `GetPasskeysAsync` | `GET passkeys` |
-| `DeletePasskeyAsync` | `DELETE passkeys/{id}` |
+| `GetPasskeysAsync` | `GET passkeys`, reading `current` and `registeredKeySet` when present |
+| `RenamePasskeyAsync` | `POST passkeys/{id}/name` `{ name }` (`null` clears it) |
+| `DeletePasskeyAsync` | `DELETE passkeys/{id}`, returns `{ signedOut, nextUrl }` |
+| `SignOutAsync` | `POST signout` `{}`, returns `{ signedOut, nextUrl }` |
+| `SaveProfileAsync` | `POST profile` `{ displayName, email? }` |
+
+`registration/complete` also returns `profileCreated`. When it is false the account exists but its profile wasn't written, and `PasskeySignIn.ProfileCreated` says so (a server that doesn't send it counts as true).
 
 - `PasskeyHttpBackendOptions.AccountEndpoint` defaults to `https://<relying party id>/account/`. It must be https, with no user info, query or fragment, and on the relying party id or a subdomain of it. `Timeout` (30 s) and `MaxResponseBytes` (256 KB) can be changed.
 - Every request carries `X-Bam-Account: bam.maui` and no `Origin`, which is how the endpoints recognize a native client.
-- The session is the `.Bam.Account` cookie. `HttpPasskeyBackend.Create` keeps it in a cookie jar of its own, in front of the platform's HTTP handler (which runs with cookies and redirects off), so the session works the same on every platform. Passing your own `HttpClient` is also supported. It then has to keep cookies itself, and it must be built with `AllowAutoRedirect = false`: the backend refuses a redirect it sees, but a client that follows redirects never shows it one.
+- The session is the `.Bam.Account` cookie. `HttpPasskeyBackend.Create` keeps it in a cookie jar of its own, in front of the platform's HTTP handler (which runs with cookies and redirects off), so the session works the same on every platform. Passing your own `HttpClient` is also supported. It then has to keep cookies itself, and it must be built with `AllowAutoRedirect = false`: the backend refuses a redirect it sees, but a client that follows redirects never shows it one. Sign-out, and removing the passkey the session signed in with, clear the jar `Create` made. A client you pass in must drop the cookie itself when those calls report `SignedOut`.
 - WebAuthn options go to the authenticator byte for byte, and the authenticator's response is sent as `credential` unchanged.
 - `nextUrl` is kept only when it is a path on the site. A credential id goes into a path only when it is base64url.
 
@@ -138,6 +143,7 @@ How a refusal maps. The endpoint's `error` code wins over the HTTP status, and i
 | `NotSignedIn`, or 401 | `NotSignedIn` |
 | `RateLimited`, or 429 | `RateLimited` |
 | `BadRequest`, `InvalidHandle`, `HandleTaken`, `EmailRequired`, `InviteRequired`, `NotFound`, `LastPasskey`, or a bare 400 | `InvalidOptions` |
+| `ProfileNotSaved` | `Unknown` |
 | `RequestRefused`, `SignInFailed`, `SignUpFailed`, `SignUpClosed`, `PasskeyNotAdded`, or another 4xx | `ServerVerificationFailed` |
 | 502, 503, 504, or a transport failure or timeout | `NetworkFailure` |
 | A redirect, a bare 404 or 405, another 5xx, or a success that isn't the contract (not JSON, a missing member, too large) | `InvalidServerResponse` |
@@ -152,11 +158,15 @@ The host must list `https://<rp id>` in `PasskeyOptions.AllowedOrigins` for the 
 |---|---|
 | `IsSupportedAsync`, `GetCapabilitiesAsync` | Ask the device, without prompting |
 | `RegisterPasskeyAsync(request)` | Create an account with its first passkey |
-| `AddPasskeyAsync()` | Add a passkey to the signed-in account |
+| `AddPasskeyAsync(name?)` | Add a passkey to the signed-in account; returns its id |
 | `AuthenticateAsync()` | Username-less sign-in |
 | `AuthenticateWithUsernameAsync(handle)` | Username-first sign-in |
-| `GetRegisteredPasskeysAsync()`, `DeletePasskeyAsync(id)` | Manage the signed-in account's passkeys |
+| `GetRegisteredPasskeysAsync()`, `RenamePasskeyAsync(id, name?)`, `DeletePasskeyAsync(id)` | Manage the signed-in account's passkeys. Removal returns a `PasskeySignOut`, which says whether it ended the session |
+| `SignOutAsync()` | End the session |
+| `SaveProfileAsync(profile)` | Save the display name and email when sign-up couldn't |
 | `GetPasskeyStatusAsync()` | Capabilities plus the passkey count when it can be read |
+
+Adding, renaming and removing are off unless `EnableManagement` is on. Sign-out and the profile aren't gated: a signed-in person can always leave, and finish an account they already have. Names are trimmed, and a blank one means "no name".
 
 No ceremony or management method throws for an expected failure. Each returns a `PasskeyResult`. The three probes (`IsSupportedAsync`, `GetCapabilitiesAsync`, `GetPasskeyStatusAsync`) throw `OperationCanceledException` when the caller cancels, and nothing else: a cancelled probe says nothing about the device, so it is never reported as "not supported".
 
@@ -233,17 +243,20 @@ Known unknown these steps settle: whether the Apple sheet needs anything beyond 
 
 ### Screens
 
-The library ships a sign-in screen and a registration screen. Each comes as a view (`PasskeySignInView`, `PasskeyRegistrationView`) to put in a page of your own, and as a ready-made page (`PasskeySignInPage`, `PasskeyRegistrationPage`). The system prompt itself is the operating system's and isn't styled; the screens are what's around it.
+The library ships a sign-in screen, a registration screen and a screen for managing passkeys. Each comes as a view (`PasskeySignInView`, `PasskeyRegistrationView`, `PasskeyManagementView`) to put in a page of your own, and as a ready-made page (`PasskeySignInPage`, `PasskeyRegistrationPage`, `PasskeyManagementPage`). The system prompt itself is the operating system's and isn't styled; the screens are what's around it.
 
 ```csharp
 builder.Services.AddBamPasskeys(registry, configuration);
 builder.Services.AddBamPasskeyUi(registry, new MyNavigator());   // after AddBamPasskeys
 ```
 
-`IPasskeyNavigator` is how the screens leave a flow. The library assumes no navigation framework, so the app decides what each call does: `SignedInAsync(signIn, flow)` once the backend has verified a ceremony, `RegistrationRequestedAsync` and `SignInRequestedAsync` for the links between the two screens, and `AlternativeSignInRequestedAsync` for the app's other way in.
+`IPasskeyNavigator` is how the screens leave a flow. The library assumes no navigation framework, so the app decides what each call does: `SignedInAsync(signIn, flow)` once the backend has verified a ceremony, `RegistrationRequestedAsync` and `SignInRequestedAsync` for the links between the two screens, `AlternativeSignInRequestedAsync` for the app's other way in, and `SignedOutAsync(signOut)` when the session has ended. `SignedOutAsync` has a default that calls `SignInRequestedAsync`, so a navigator written before it still compiles.
 
 - **Sign-in.** `PasskeyExperience.SignInMode` picks the layout: `UsernameLess` (one passkey button), `UsernameFirst` (a username field and Continue), or `Choice` (both, the default). With `EnableUsernameLessAuthentication` off, the screen is always username-first. The page checks the device each time it appears; a device that can't do passkeys gets the unavailable or device-setup screen, and the sign-in buttons stay off.
 - **Registration.** What a passkey is and why to use one, the username and name fields, and optional email and invite code fields (`AskForEmail`, `AskForInviteCode`). Only the fields the screen shows are sent. The success screen shows only after the backend has verified the new credential; its Continue button calls `SignedInAsync`.
+- **Profile.** When sign-up reports `ProfileCreated` false, the success screen says the details weren't saved and offers to save them (`SaveProfileCommand`, with the name and email the user typed). Continue stays, so the person can leave without saving, and `SignedInAsync` gets `ProfileCreated` false. A refused save is a "Couldn't save your details" failure whose Back returns to the success screen.
+- **Managing passkeys.** `PasskeyManagementPage` loads the account's passkeys each time it appears. Each row shows the name (or "Unnamed passkey"), when it was added and last used, "This device's passkey" for the one the session signed in with, and the device only when the backend sends one. The library never makes device details up. A name field and Add passkey add another; Rename opens an inline editor; Remove asks first, and warns when the passkey is the one this session uses. The last passkey can't be removed: its Remove is off, and a server refusal (`LastPasskey`) says why. An account with none shows an empty state with Add passkey. Refresh reloads, and Sign out ends the session. When sign-out or a removal ends the session, the screen clears and calls `SignedOutAsync`. If the session has already gone, the failure screen offers "Sign in again".
+- **Signed in.** While the app's `SignedInAsync` runs, the sign-in screen shows "You're signed in to {app}" and a spinner instead of a blank page (bam.maui#17).
 - **Progress.** While the system prompt is up the screen shows the working text and a Cancel button, which cancels the ceremony.
 - **After success.** Sign-in goes back to the form as soon as the app's `SignedInAsync` returns, and again whenever the page appears, so a cached page the app returns to after sign-out isn't blank. Registration clears its fields after Done.
 - **The app's navigation failing.** If an `IPasskeyNavigator` call throws, the screen catches it, logs the exception type (never its text), and shows an `Unknown` failure whose Try again makes the same call again. Nothing throws through a command.
@@ -267,7 +280,7 @@ Back returns to the form with what the user typed kept. Every failure screen off
 
 **Layout and accessibility.** On a narrow window the brand sits above the content in one column of readable width; from 840 wide it sits beside it. Headings, fields, buttons, the logo and the progress spinner carry semantic descriptions for screen readers.
 
-The screens' view models (`PasskeySignInViewModel`, `PasskeyRegistrationViewModel`) are public, so an app that wants its own layout can bind its own XAML to them and keep the flow, the recovery and the navigation.
+The screens' view models (`PasskeySignInViewModel`, `PasskeyRegistrationViewModel`, `PasskeyManagementViewModel`) are public, so an app that wants its own layout can bind its own XAML to them and keep the flow, the recovery and the navigation.
 
 ### Security
 
@@ -293,7 +306,7 @@ dotnet build bam.maui.tests/bam.maui.tests.csproj -c Release
 BAM_ARG_STYLE=Posix dotnet run --project bam.maui.tests/bam.maui.tests.csproj -c Release --no-build -- --ut
 ```
 
-Suites: `pkcf` configuration, branding, capabilities and what the models print; `pken` error normalization; `pkcl` client orchestration, cancellation, feature switches and management; `pkdg` where a cancellation came from, and what reaches the log; `pkrg` registering the client and the screens in a registry; `pkwj` reading options and writing response JSON; `pkwn` the Windows authenticator and its interop layout; `pkpe` the Android, Apple and Windows error maps; `pkpc` a callback ceremony ending from the caller's token; `pkhb` the HTTP backend against fake account endpoints; `pkrc` the recovery plan for every error category; `pksi` the sign-in screen's view model; `pkrv` the registration screen's view model; `pkth` the theme. The screen tests drive the view models, not rendered views.
+Suites: `pkcf` configuration, branding, capabilities and what the models print; `pken` error normalization; `pkcl` client orchestration, cancellation, feature switches and management; `pkdg` where a cancellation came from, and what reaches the log; `pkrg` registering the client and the screens in a registry; `pkwj` reading options and writing response JSON; `pkwn` the Windows authenticator and its interop layout; `pkpe` the Android, Apple and Windows error maps; `pkpc` a callback ceremony ending from the caller's token; `pkhb` the HTTP backend against fake account endpoints; `pkrc` the recovery plan for every error category; `pksi` the sign-in screen's view model; `pkrv` the registration screen's view model; `pkth` the theme; `pkhm` the HTTP management, sign-out and profile calls; `pkcm` the client's management calls and their gates; `pkmv` the management screen's view model; `pkho` the signed-in hand-off and the profile step. The screen tests drive the view models, not rendered views.
 
 ### Dependencies
 

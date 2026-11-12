@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Phase 5: passkey management (bam.maui#18)
+
+Added
+- `PasskeyManagementView`, `PasskeyManagementPage` and `PasskeyManagementViewModel`. They list the account's passkeys (name, added, last used, the session's own, and the device only when the backend sends one), add another with an optional name, rename inline, remove after a confirmation that warns about the session's own passkey, and offer Refresh and Sign out. An account with none gets an empty state. The last passkey's Remove is off.
+- `IPasskeyClient.RenamePasskeyAsync`, `SignOutAsync` and `SaveProfileAsync`, with the matching `IPasskeyBackend` members. `HttpPasskeyBackend` posts `passkeys/{id}/name`, `signout` and `profile`.
+- `PasskeySignOut` (`SignedOut`, `NextUrl`) and `PasskeyProfile` (`DisplayName`, `Email`).
+- `PasskeySignIn.ProfileCreated`, read from `registration/complete`'s `profileCreated` (true when absent). When it is false the registration success screen offers to save the profile (`NeedsProfile`, `ShowsProfileStep`, `SaveProfileCommand`). Continue still works without saving.
+- `PasskeyCredential.IsCurrent` and `IsRegisteredKeySet`, from the list's `current` and `registeredKeySet`.
+- `IPasskeyNavigator.SignedOutAsync`, a default interface method that calls `SignInRequestedAsync`.
+- `PasskeyFlow.Management` and `PasskeyFlow.Profile`, their failure headings, and `PasskeyRecoveryAction.SignInAgain`, offered when the session has gone (`NotSignedIn`) in those flows.
+- The sign-in screen shows a signed-in panel ("You're signed in to {app}", a spinner) while the app's `SignedInAsync` runs. Closes bam.maui#17.
+- The screen strings for all of this on `PasskeyText`.
+- 16 unit tests (90 in all): suites `pkhm`, `pkcm`, `pkmv`, `pkho`, and one more in `pkrc`.
+
+Changed (breaking for other implementations of the interfaces)
+- `IPasskeyClient.AddPasskeyAsync` takes an optional name and returns the new passkey's id.
+- `IPasskeyClient.DeletePasskeyAsync` and `IPasskeyBackend.DeletePasskeyAsync` return `PasskeySignOut`, because removing the passkey a session signed in with ends that session.
+- `IPasskeyBackend.CompleteAdditionalRegistrationAsync` takes the name and returns the id.
+- `IPasskeyBackend` has `RenamePasskeyAsync`, `SignOutAsync` and `SaveProfileAsync`.
+- The registration screen's `DoneCommand` runs only on the success screen.
+
+Fixed
+- A sign-out, or removing the session's passkey, clears the cookie jar `HttpPasskeyBackend.Create` made, so the old session cookie isn't sent again. A host's own `HttpClient` has to do this itself (the README says so).
+
+Decisions
+- Adding, renaming and removing stay behind `EnableManagement`. Sign-out and saving the profile don't: a signed-in person can always leave, and finish an account they already have.
+- The server's `ProfileNotSaved` maps to `Unknown`: the request was fine, so there is nothing for the user to change.
+- No device details are made up. The row shows a device only when the backend sends one, and bam.useraccounts doesn't today.
+- Removal reloads the list after it works, instead of editing it locally, so the screen shows what the server holds.
+- `registeredKeySet` is read and kept on the model but not shown; nothing on screen needs it yet.
+
+Outstanding
+- The management screen compiles for every target but hasn't been rendered on a device.
+- Registration's `ceremonyId` (bam.useraccounts#23) isn't sent yet.
+
 ### Phase 4: white-label screens (bam.maui#10)
 
 Added

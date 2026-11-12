@@ -34,6 +34,9 @@ public static class PasskeyUiRegistration
         registry.For<PasskeyRegistrationView>().Use<PasskeyRegistrationView>(r => new PasskeyRegistrationView(r.Get<PasskeyRegistrationViewModel>(), r.Get<PasskeyTheme>()));
         registry.For<PasskeySignInPage>().Use<PasskeySignInPage>(r => new PasskeySignInPage(r.Get<PasskeySignInView>()));
         registry.For<PasskeyRegistrationPage>().Use<PasskeyRegistrationPage>(r => new PasskeyRegistrationPage(r.Get<PasskeyRegistrationView>()));
+        registry.For<PasskeyManagementViewModel>().Use<PasskeyManagementViewModel>(r => new PasskeyManagementViewModel(r.Get<IPasskeyClient>(), configuration, r.Get<IPasskeyNavigator>(), logger));
+        registry.For<PasskeyManagementView>().Use<PasskeyManagementView>(r => new PasskeyManagementView(r.Get<PasskeyManagementViewModel>(), r.Get<PasskeyTheme>()));
+        registry.For<PasskeyManagementPage>().Use<PasskeyManagementPage>(r => new PasskeyManagementPage(r.Get<PasskeyManagementView>()));
         return registry;
     }
 
@@ -57,6 +60,9 @@ public static class PasskeyUiRegistration
         services.AddTransient(_ => registry.Get<PasskeyRegistrationView>());
         services.AddTransient(_ => registry.Get<PasskeySignInPage>());
         services.AddTransient(_ => registry.Get<PasskeyRegistrationPage>());
+        services.AddTransient(_ => registry.Get<PasskeyManagementViewModel>());
+        services.AddTransient(_ => registry.Get<PasskeyManagementView>());
+        services.AddTransient(_ => registry.Get<PasskeyManagementPage>());
         return services;
     }
 }

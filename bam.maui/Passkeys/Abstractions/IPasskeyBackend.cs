@@ -37,8 +37,10 @@ public interface IPasskeyBackend
 
     /// <summary>Adds a passkey to the signed-in account: submits the authenticator's response for verification.</summary>
     /// <param name="response">The authenticator's registration response.</param>
+    /// <param name="name">A name for the new passkey, or null.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
-    Task CompleteAdditionalRegistrationAsync(WebAuthnRegistrationResponse response, CancellationToken cancellationToken = default);
+    /// <returns>The new passkey's credential id, as the server identifies it.</returns>
+    Task<string> CompleteAdditionalRegistrationAsync(WebAuthnRegistrationResponse response, string? name = null, CancellationToken cancellationToken = default);
 
     /// <summary>Sign-in: asks the server for request options.</summary>
     /// <param name="handle">The account to sign in, or null for username-less (discoverable) sign-in.</param>
@@ -61,5 +63,27 @@ public interface IPasskeyBackend
     /// <summary>Removes one of the signed-in account's passkeys on the server.  The credential may remain in the device's credential manager; only the server stops accepting it.</summary>
     /// <param name="credentialId">The credential id, as <see cref="PasskeyCredential.CredentialId"/> reported it.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
-    Task DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default);
+    /// <returns>Whether removing it ended this session (it does when the session was opened with it).</returns>
+    Task<PasskeySignOut> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default);
+
+    /// <summary>Renames one of the signed-in account's passkeys.</summary>
+    /// <param name="credentialId">The credential id, as <see cref="PasskeyCredential.CredentialId"/> reported it.</param>
+    /// <param name="name">The new name, or null (or blank) to clear it.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task that completes when the server has renamed it.</returns>
+    Task RenamePasskeyAsync(string credentialId, string? name, CancellationToken cancellationToken = default);
+
+    /// <summary>Ends the session.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Whether a session ended, and where the server suggests going.</returns>
+    Task<PasskeySignOut> SignOutAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Writes the signed-in account's profile, for a sign-up whose profile wasn't written
+    /// (<see cref="PasskeySignIn.ProfileCreated"/> false).  Succeeds too when the profile already exists.
+    /// </summary>
+    /// <param name="profile">The name and email.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task that completes when the profile is saved.</returns>
+    Task SaveProfileAsync(PasskeyProfile profile, CancellationToken cancellationToken = default);
 }

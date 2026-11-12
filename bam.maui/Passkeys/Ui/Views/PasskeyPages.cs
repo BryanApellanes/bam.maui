@@ -35,6 +35,35 @@ public sealed class PasskeySignInPage : ContentPage
     }
 }
 
+/// <summary>
+/// A ready-made page around <see cref="PasskeyManagementView"/>, for an app that navigates between pages.  It loads the
+/// list each time it appears.
+/// </summary>
+public sealed class PasskeyManagementPage : ContentPage
+{
+    /// <summary>Creates the page.</summary>
+    /// <param name="view">The management view.</param>
+    public PasskeyManagementPage(PasskeyManagementView view)
+    {
+        View = view ?? throw new ArgumentNullException(nameof(view));
+        Title = view.ViewModel.Title;
+        Content = new ScrollView { Content = view };
+        this.SetDynamicResource(BackgroundColorProperty, PasskeyResourceKeys.Background);
+        Resources.MergedDictionaries.Add(view.Theme.Resources);
+    }
+
+    /// <summary>The management view.</summary>
+    public PasskeyManagementView View { get; }
+
+    /// <inheritdoc />
+    protected override async void OnAppearing()
+    {
+        base.OnAppearing();
+        // LoadAsync reports every failure on the screen; the view model never throws through here.
+        await View.ViewModel.LoadAsync();
+    }
+}
+
 /// <summary>A ready-made page around <see cref="PasskeyRegistrationView"/>, for an app that navigates between pages.</summary>
 public sealed class PasskeyRegistrationPage : ContentPage
 {

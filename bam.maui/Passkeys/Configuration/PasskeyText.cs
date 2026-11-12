@@ -113,6 +113,87 @@ public sealed class PasskeyText
     /// <summary>The recovery button from a failed sign-in to registration.</summary>
     public string CreateAccountInstead { get; set; } = "Create an account";
 
+    /// <summary>The recovery button when the session has ended.</summary>
+    public string SignInAgain { get; set; } = "Sign in again";
+
+    /// <summary>The progress line for a call that puts up no system prompt (listing, renaming, removing, signing out, saving the profile).</summary>
+    public string Updating { get; set; } = "Just a moment.";
+
+    /// <summary>The management heading.</summary>
+    public string ManagementTitle { get; set; } = "Your passkeys";
+
+    /// <summary>The line under the management heading. Takes the app name.</summary>
+    public string ManagementIntro { get; set; } = "These are the passkeys you can sign in to {0} with.";
+
+    /// <summary>The heading of the empty state, when the account has no passkeys.</summary>
+    public string NoPasskeysTitle { get; set; } = "No passkeys yet";
+
+    /// <summary>The empty state's explanation.</summary>
+    public string NoPasskeysMessage { get; set; } = "Add a passkey to sign in with this device instead of a password.";
+
+    /// <summary>The button that adds another passkey.</summary>
+    public string AddPasskey { get; set; } = "Add a passkey";
+
+    /// <summary>The label of the field naming a passkey, when adding or renaming one.</summary>
+    public string PasskeyNameLabel { get; set; } = "Passkey name (optional)";
+
+    /// <summary>The hint inside an empty passkey name field.</summary>
+    public string PasskeyNamePlaceholder { get; set; } = "For example, My phone";
+
+    /// <summary>What a passkey without a name is called in the list.</summary>
+    public string UnnamedPasskey { get; set; } = "Passkey";
+
+    /// <summary>When a passkey was added. <c>{0}</c> is the date.</summary>
+    public string AddedOn { get; set; } = "Added {0}";
+
+    /// <summary>When a passkey last signed in. <c>{0}</c> is the date.</summary>
+    public string LastUsedOn { get; set; } = "Last used {0}";
+
+    /// <summary>The tag on the passkey this session was opened with.</summary>
+    public string CurrentPasskey { get; set; } = "You signed in with this one";
+
+    /// <summary>The button that renames a passkey.</summary>
+    public string Rename { get; set; } = "Rename";
+
+    /// <summary>The button that saves a passkey's new name, or a profile.</summary>
+    public string Save { get; set; } = "Save";
+
+    /// <summary>The button that removes a passkey.</summary>
+    public string Remove { get; set; } = "Remove";
+
+    /// <summary>The heading of the removal confirmation.</summary>
+    public string RemoveTitle { get; set; } = "Remove this passkey?";
+
+    /// <summary>What removing a passkey does.</summary>
+    public string RemoveMessage { get; set; } = "You won't be able to sign in with it any more. Your password manager may keep it until you delete it there.";
+
+    /// <summary>The extra line when the passkey is the one this session was opened with.</summary>
+    public string RemoveCurrentMessage { get; set; } = "You signed in with this passkey, so removing it signs you out here.";
+
+    /// <summary>The button that keeps the passkey and closes the removal confirmation.</summary>
+    public string Keep { get; set; } = "Keep it";
+
+    /// <summary>Shown when the server refuses to remove the account's only passkey.</summary>
+    public string LastPasskeyMessage { get; set; } = "This is your only passkey. Add another one before you remove it.";
+
+    /// <summary>The button that loads the list again.</summary>
+    public string Refresh { get; set; } = "Refresh";
+
+    /// <summary>The button that ends the session.</summary>
+    public string SignOut { get; set; } = "Sign out";
+
+    /// <summary>The heading of an error screen when listing or changing passkeys failed.</summary>
+    public string ManagementFailedTitle { get; set; } = "Couldn't update your passkeys";
+
+    /// <summary>The heading of an error screen when saving the profile failed.</summary>
+    public string ProfileFailedTitle { get; set; } = "Couldn't save your details";
+
+    /// <summary>Shown on the registration success screen when sign-up couldn't save the name and email.</summary>
+    public string ProfileNotSavedMessage { get; set; } = "Your account is ready, but your name and email weren't saved. Save them now?";
+
+    /// <summary>Shown on the sign-in screen while the app takes over after sign-in.</summary>
+    public string SigningIn { get; set; } = "Opening your account.";
+
     /// <summary>Puts the app name into a member that takes it.</summary>
     /// <param name="template">The member's text.</param>
     /// <param name="applicationName">The brand's app name.</param>
