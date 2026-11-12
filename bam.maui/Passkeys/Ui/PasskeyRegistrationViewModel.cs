@@ -1,9 +1,11 @@
+using Bam.Logging;
+
 namespace Bam.Maui.Passkeys;
 
 /// <summary>
 /// The registration screen: what a passkey is and why to use one, the sign-up fields, and the create button.
 /// Success is shown only after the backend has verified the new credential; the success screen's
-/// <see cref="DoneCommand"/> then calls <see cref="IPasskeyNavigator.SignedInAsync"/>.
+/// <see cref="DoneCommand"/> then calls <see cref="IPasskeyNavigator.SignedInAsync"/>, and the screen is cleared for the next account.
 /// </summary>
 public sealed class PasskeyRegistrationViewModel : PasskeyFlowViewModel
 {
@@ -17,8 +19,9 @@ public sealed class PasskeyRegistrationViewModel : PasskeyFlowViewModel
     /// <param name="client">The passkey client.</param>
     /// <param name="configuration">The app's configuration.</param>
     /// <param name="navigator">The app's navigation.</param>
-    public PasskeyRegistrationViewModel(IPasskeyClient client, PasskeyConfiguration configuration, IPasskeyNavigator navigator)
-        : base(client, configuration, navigator)
+    /// <param name="logger">Where a failure in the app's navigation is logged, or null.</param>
+    public PasskeyRegistrationViewModel(IPasskeyClient client, PasskeyConfiguration configuration, IPasskeyNavigator navigator, ILogger? logger = null)
+        : base(client, configuration, navigator, logger)
     {
         CreateCommand = new PasskeyCommand(CreateAsync, () => State != PasskeyViewState.Working && !string.IsNullOrWhiteSpace(Handle) && !string.IsNullOrWhiteSpace(DisplayName));
         DoneCommand = new PasskeyCommand(DoneAsync, () => _signIn is not null);
@@ -97,6 +100,9 @@ public sealed class PasskeyRegistrationViewModel : PasskeyFlowViewModel
     /// <summary>Leaves the success screen for the signed-in app.</summary>
     public PasskeyCommand DoneCommand { get; }
 
+    /// <summary>Back from a failed "done" is the success screen again: the account exists.</summary>
+    protected override PasskeyViewState DismissedState => _signIn is null ? PasskeyViewState.Ready : PasskeyViewState.Succeeded;
+
     /// <inheritdoc />
     protected override void RaiseCommands()
     {
@@ -120,13 +126,32 @@ public sealed class PasskeyRegistrationViewModel : PasskeyFlowViewModel
             _signIn = signIn;
             DoneCommand.RaiseCanExecuteChanged();
             return Task.CompletedTask;
-        });
+        }, typedInput: true);
     }
 
     private Task DoneAsync()
     {
         PasskeySignIn? signIn = _signIn;
-        return signIn is null ? Task.CompletedTask : Navigator.SignedInAsync(signIn, PasskeyFlow.Registration);
+        if (signIn is null)
+        {
+            return Task.CompletedTask;
+        }
+        return NavigateAsync(async () =>
+        {
+            await Navigator.SignedInAsync(signIn, PasskeyFlow.Registration);
+            Clear();
+        });
+    }
+
+    // The account is handed over: nothing of it stays on a screen the app may show again.
+    private void Clear()
+    {
+        _signIn = null;
+        Handle = string.Empty;
+        DisplayName = string.Empty;
+        Email = string.Empty;
+        InviteCode = string.Empty;
+        Reset();
     }
 
     private static string? NullIfBlank(string value)

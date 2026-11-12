@@ -30,7 +30,7 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
                 Visible(choice), Visible(usernameLess), Visible(usernameFirst), fallback.Mode,
                 usernameFirst.SignInCommand.CanExecute(null), choice.SignInCommand.CanExecute(null),
                 continueBlank, continueWhitespace, continueTyped, choice.Handle,
-                choice.Title, choice.State, choice.ShowsForm, choice.OffersRegistration, choice.HasAlternative);
+                choice.Title, choice.State, choice.IsReady, choice.OffersRegistration, choice.HasAlternative, choice.BackCommand.CanExecute(null));
         })
         .TheTest
         .ShouldPass<ModesOutcome>((because, outcome) =>
@@ -48,6 +48,7 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             because.ItsTrue("the title carries the app name: " + outcome.Title, outcome.Title == "Sign in to Example");
             because.ItsTrue("the screen starts ready", outcome.State == PasskeyViewState.Ready);
             because.ItsTrue("the form shows when ready", outcome.ShowsForm);
+            because.ItsTrue("back can't run on the form", !outcome.BackOnForm);
             because.ItsTrue("registration is offered by default", outcome.OffersRegistration);
             because.ItsTrue("no alternative without a label", !outcome.HasAlternative);
         })
@@ -63,6 +64,8 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
         {
             FakePasskeyNavigator buttonNavigator = new FakePasskeyNavigator();
             PasskeySignInViewModel button = new PasskeySignInViewModel(client, PasskeyClientFixture.ValidConfiguration(), buttonNavigator);
+            PasskeyViewState whileNavigating = PasskeyViewState.Ready;
+            buttonNavigator.WhileSignedIn = () => whileNavigating = button.State;
             Wait(button.SignInCommand.ExecuteAsync());
 
             FakePasskeyNavigator usernameNavigator = new FakePasskeyNavigator();
@@ -70,7 +73,7 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             username.Handle = "  ada  ";
             Wait(username.ContinueCommand.ExecuteAsync());
             return new SignedInOutcome(
-                buttonNavigator.Joined, buttonNavigator.SignedIn?.Handle, buttonNavigator.SignedInFrom, button.State, button.HasSucceeded, button.ShowsForm,
+                buttonNavigator.Joined, buttonNavigator.SignedIn?.Handle, buttonNavigator.SignedInFrom, whileNavigating, button.State, button.SignInCommand.CanExecute(null),
                 usernameNavigator.Joined, client.LastHandle, string.Join(",", client.Calls));
         })
         .TheTest
@@ -79,8 +82,9 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             because.ItsTrue("the button sign-in navigates once: " + outcome.ButtonCalls, outcome.ButtonCalls == "signedIn");
             because.ItsTrue("the navigator gets the signed-in account", outcome.SignedInHandle == "ada");
             because.ItsTrue("the navigator is told it came from sign-in", outcome.SignedInFrom == PasskeyFlow.SignIn);
-            because.ItsTrue("the screen shows success", outcome.State == PasskeyViewState.Succeeded && outcome.HasSucceeded);
-            because.ItsTrue("the form is hidden after success", !outcome.ShowsForm);
+            because.ItsTrue("the screen is on success while the app navigates", outcome.WhileNavigating == PasskeyViewState.Succeeded);
+            because.ItsTrue("then back on the form, for when the app shows it again", outcome.State == PasskeyViewState.Ready);
+            because.ItsTrue("and sign-in can run again", outcome.SignInAgain);
             because.ItsTrue("the username sign-in navigates once: " + outcome.UsernameCalls, outcome.UsernameCalls == "signedIn");
             because.ItsTrue("the username is trimmed before it is sent: [" + outcome.SentHandle + "]", outcome.SentHandle == "ada");
             because.ItsTrue("each button calls its own ceremony: " + outcome.ClientCalls, outcome.ClientCalls == "authenticate,authenticateWithUsername");
@@ -105,7 +109,7 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             bool cancelBefore = screen.CancelCommand.CanExecute(null);
             Task running = screen.SignInCommand.ExecuteAsync();
             PasskeyViewState whileRunning = screen.State;
-            bool showsFormWhileRunning = screen.ShowsForm;
+            bool showsFormWhileRunning = screen.IsReady;
             bool cancelWhileRunning = screen.CancelCommand.CanExecute(null);
             bool signInWhileRunning = screen.SignInCommand.CanExecute(null);
             bool tryAgainWhileRunning = screen.TryAgainCommand.CanExecute(null);
@@ -125,7 +129,7 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             because.ItsTrue("the note is the cancelled text: " + outcome.Dismissed.Note, outcome.Dismissed.Note == outcome.CancelledText);
             because.ItsTrue("cancel can't run with nothing running", !outcome.CancelBefore);
             because.ItsTrue("the screen is working while the ceremony runs", outcome.WhileRunning == PasskeyViewState.Working);
-            because.ItsTrue("the form stays while working", outcome.ShowsFormWhileRunning);
+            because.ItsTrue("the progress view replaces the form while working", !outcome.ShowsFormWhileRunning);
             because.ItsTrue("cancel can run while the ceremony runs", outcome.CancelWhileRunning);
             because.ItsTrue("sign-in can't start twice", !outcome.SignInWhileRunning);
             because.ItsTrue("try again can't run while working", !outcome.TryAgainWhileRunning);
@@ -153,7 +157,7 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             client.SignInResults.Enqueue(ScriptedPasskeyClient.Failed(PasskeyErrorCategory.NoCredentials));
             Wait(screen.SignInCommand.ExecuteAsync());
             FailedState failed = new FailedState(screen.State, screen.ErrorTitle, screen.ErrorMessage, screen.HasErrorHint, screen.OffersTryAgain,
-                screen.OffersCreateAccountInstead, screen.OffersAnotherWay, screen.OffersSignInInstead, screen.ShowsForm);
+                screen.OffersCreateAccountInstead, screen.OffersAnotherWay, screen.OffersSignInInstead, screen.IsReady);
             Wait(screen.GoToRegistrationCommand.ExecuteAsync());
             Wait(screen.UseAnotherWayCommand.ExecuteAsync());
             Wait(screen.TryAgainCommand.ExecuteAsync());
@@ -177,7 +181,7 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             because.ItsTrue("sign-in-instead is not offered on the sign-in screen", !outcome.Failed.SignInInstead);
             because.ItsTrue("the links reach the navigator, and the retry signs in: " + outcome.NavigatorCalls, outcome.NavigatorCalls == "registration,alternative,signedIn");
             because.ItsTrue("try again runs the same ceremony: " + outcome.ClientCalls, outcome.ClientCalls.StartsWith("authenticate,authenticate", StringComparison.Ordinal));
-            because.ItsTrue("the retry succeeds", outcome.AfterRetry == PasskeyViewState.Succeeded);
+            because.ItsTrue("the retry signs in and the screen is back on the form", outcome.AfterRetry == PasskeyViewState.Ready);
             because.ItsTrue("dismissing an error returns to the form", outcome.DismissedState == PasskeyViewState.Ready && outcome.DismissedTitle.Length == 0);
             because.ItsTrue("the other way stays available on the form", outcome.AnotherWayOnForm);
             because.ItsTrue("the other way carries the app's label", outcome.AlternativeLabel == "Email me a link");
@@ -232,6 +236,108 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
         .UnlessItFailed();
     }
 
+    [UnitTest]
+    public void LetTheUserFixATypedUsername()
+    {
+        After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
+        .When<ScriptedPasskeyClient>("signs in with a mistyped username, goes back, fixes it and continues", (client, reg) =>
+        {
+            FakePasskeyNavigator navigator = new FakePasskeyNavigator();
+            PasskeySignInViewModel screen = new PasskeySignInViewModel(client, PasskeyClientFixture.ValidConfiguration(), navigator);
+            screen.Handle = "adda";
+            client.SignInResults.Enqueue(ScriptedPasskeyClient.Failed(PasskeyErrorCategory.NoCredentials));
+            Wait(screen.ContinueCommand.ExecuteAsync());
+            TypedFailure failed = new TypedFailure(screen.State, screen.OffersTryAgain, screen.OffersBack, screen.OffersCreateAccountInstead, screen.BackCommand.CanExecute(null));
+            Wait(screen.BackCommand.ExecuteAsync());
+            PasskeyViewState afterBack = screen.State;
+            string keptHandle = screen.Handle;
+            bool backAfterBack = screen.BackCommand.CanExecute(null);
+            screen.Handle = "ada";
+            Wait(screen.ContinueCommand.ExecuteAsync());
+
+            PasskeySignInViewModel button = new PasskeySignInViewModel(client, PasskeyClientFixture.ValidConfiguration(), new FakePasskeyNavigator());
+            client.SignInResults.Enqueue(ScriptedPasskeyClient.Failed(PasskeyErrorCategory.NoCredentials));
+            Wait(button.SignInCommand.ExecuteAsync());
+            return new TypedOutcome(failed, afterBack, keptHandle, backAfterBack, client.LastHandle, navigator.Joined, button.OffersTryAgain, button.OffersBack);
+        })
+        .TheTest
+        .ShouldPass<TypedOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("a mistyped username fails", outcome.Failed.State == PasskeyViewState.Failed);
+            because.ItsTrue("try again isn't offered: it would send the same username", !outcome.Failed.TryAgain);
+            because.ItsTrue("back and create an account are offered", outcome.Failed.Back && outcome.Failed.CreateAccount && outcome.Failed.BackRuns);
+            because.ItsTrue("back returns to the form", outcome.AfterBack == PasskeyViewState.Ready);
+            because.ItsTrue("with the username kept: " + outcome.KeptHandle, outcome.KeptHandle == "adda");
+            because.ItsTrue("back can't run on the form", !outcome.BackAfterBack);
+            because.ItsTrue("the fixed username is the one sent: " + outcome.SentHandle, outcome.SentHandle == "ada");
+            because.ItsTrue("and the user is signed in: " + outcome.NavigatorCalls, outcome.NavigatorCalls == "signedIn");
+            because.ItsTrue("without a typed username, try again is still offered", outcome.ButtonTryAgain && outcome.ButtonBack);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    [UnitTest]
+    public void SurviveTheAppsNavigationFailing()
+    {
+        After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
+        .When<ScriptedPasskeyClient>("signs in while the app's navigation throws, tries again once it works, and follows a broken link", (client, reg) =>
+        {
+            FakePasskeyNavigator navigator = new FakePasskeyNavigator { SignedInFailure = new InvalidOperationException("route //home not found") };
+            CapturingLogger logger = new CapturingLogger();
+            PasskeySignInViewModel screen = new PasskeySignInViewModel(client, PasskeyClientFixture.ValidConfiguration(), navigator, logger);
+            string? escaped = null;
+            try
+            {
+                Wait(screen.SignInCommand.ExecuteAsync());
+            }
+            catch (Exception thrown)
+            {
+                escaped = thrown.GetType().Name;
+            }
+            NavigationFailure broken = new NavigationFailure(screen.State, screen.ErrorMessage, screen.OffersTryAgain, screen.OffersBack, screen.SignInCommand.CanExecute(null));
+            navigator.SignedInFailure = null;
+            Wait(screen.TryAgainCommand.ExecuteAsync());
+            PasskeyViewState afterRetry = screen.State;
+            int ceremonies = client.Calls.Count(c => c == "authenticate");
+
+            navigator.RegistrationFailure = new InvalidOperationException("no such page");
+            Wait(screen.GoToRegistrationCommand.ExecuteAsync());
+            PasskeyViewState afterBrokenLink = screen.State;
+            Wait(screen.BackCommand.ExecuteAsync());
+
+            FakePasskeyNavigator reshowNavigator = new FakePasskeyNavigator();
+            PasskeySignInViewModel cached = new PasskeySignInViewModel(client, PasskeyClientFixture.ValidConfiguration(), reshowNavigator);
+            PasskeyViewState afterLoad = PasskeyViewState.Failed;
+            reshowNavigator.WhileSignedIn = () =>
+            {
+                Wait(cached.LoadAsync());
+                afterLoad = cached.State;
+            };
+            Wait(cached.SignInCommand.ExecuteAsync());
+            return new NavigationOutcome(escaped, broken, afterRetry, ceremonies, navigator.Joined, afterBrokenLink, screen.State, afterLoad,
+                cached.SignInCommand.CanExecute(null), logger.AllText, screen.Configuration.Messages.Unknown);
+        })
+        .TheTest
+        .ShouldPass<NavigationOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("nothing escapes the command: " + outcome.Escaped, outcome.Escaped is null);
+            because.ItsTrue("a navigation failure is a failure screen, not a blank success screen", outcome.Broken.State == PasskeyViewState.Failed);
+            because.ItsTrue("with the configured message", outcome.Broken.Message == outcome.UnknownMessage);
+            because.ItsTrue("with try again and back", outcome.Broken.TryAgain && outcome.Broken.Back);
+            because.ItsTrue("try again navigates again and the screen is back on the form", outcome.AfterRetry == PasskeyViewState.Ready);
+            because.ItsTrue("without a second ceremony: " + outcome.Ceremonies, outcome.Ceremonies == 1);
+            because.ItsTrue("the navigator was called twice for the sign-in, then once for the link: " + outcome.NavigatorCalls, outcome.NavigatorCalls == "signedIn,signedIn,registration");
+            because.ItsTrue("a broken link is a failure screen too", outcome.AfterBrokenLink == PasskeyViewState.Failed);
+            because.ItsTrue("and back returns to the form", outcome.AfterBack == PasskeyViewState.Ready);
+            because.ItsTrue("a screen loaded again after a sign-in is on the form", outcome.AfterLoad == PasskeyViewState.Ready && outcome.SignInAfterLoad);
+            because.ItsTrue("the failure is logged by exception type: " + outcome.Logged, outcome.Logged.Contains("InvalidOperationException", StringComparison.Ordinal));
+            because.ItsTrue("without the exception's text", !outcome.Logged.Contains("//home", StringComparison.Ordinal) && !outcome.Logged.Contains("no such page", StringComparison.Ordinal));
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
     private static PasskeySignInViewModel Screen(IPasskeyClient client, Action<PasskeyConfiguration> configure)
     {
         PasskeyConfiguration configuration = PasskeyClientFixture.ValidConfiguration();
@@ -263,9 +369,9 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
     }
 
     private sealed record ModesOutcome(string Choice, string UsernameLess, string UsernameFirst, PasskeySignInMode Fallback, bool ButtonInUsernameFirst, bool ButtonInChoice,
-        bool ContinueBlank, bool ContinueWhitespace, bool ContinueTyped, string NullHandle, string Title, PasskeyViewState State, bool ShowsForm, bool OffersRegistration, bool HasAlternative);
+        bool ContinueBlank, bool ContinueWhitespace, bool ContinueTyped, string NullHandle, string Title, PasskeyViewState State, bool ShowsForm, bool OffersRegistration, bool HasAlternative, bool BackOnForm);
 
-    private sealed record SignedInOutcome(string ButtonCalls, string? SignedInHandle, PasskeyFlow? SignedInFrom, PasskeyViewState State, bool HasSucceeded, bool ShowsForm,
+    private sealed record SignedInOutcome(string ButtonCalls, string? SignedInHandle, PasskeyFlow? SignedInFrom, PasskeyViewState WhileNavigating, PasskeyViewState State, bool SignInAgain,
         string UsernameCalls, string? SentHandle, string ClientCalls);
 
     private sealed record CancelState(PasskeyViewState State, bool HasFailed, bool HasNote, string? Note, bool NoRecovery);
@@ -277,6 +383,15 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
 
     private sealed record RecoveryOutcome(FailedState Failed, string NavigatorCalls, string ClientCalls, PasskeyViewState AfterRetry, string ExpectedTitle,
         PasskeyViewState DismissedState, string DismissedTitle, bool AnotherWayOnForm, string AlternativeLabel);
+
+    private sealed record TypedFailure(PasskeyViewState State, bool TryAgain, bool Back, bool CreateAccount, bool BackRuns);
+
+    private sealed record TypedOutcome(TypedFailure Failed, PasskeyViewState AfterBack, string KeptHandle, bool BackAfterBack, string? SentHandle, string NavigatorCalls, bool ButtonTryAgain, bool ButtonBack);
+
+    private sealed record NavigationFailure(PasskeyViewState State, string Message, bool TryAgain, bool Back, bool SignIn);
+
+    private sealed record NavigationOutcome(string? Escaped, NavigationFailure Broken, PasskeyViewState AfterRetry, int Ceremonies, string NavigatorCalls, PasskeyViewState AfterBrokenLink,
+        PasskeyViewState AfterBack, PasskeyViewState AfterLoad, bool SignInAfterLoad, string Logged, string UnknownMessage);
 
     private sealed record UnsupportedState(PasskeyViewState State, string Title, string Message, bool HasHint, bool TryAgain, bool SignIn, bool Continue);
 

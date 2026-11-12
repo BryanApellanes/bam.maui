@@ -23,7 +23,10 @@ public enum PasskeyRecoveryAction
     SignInInstead,
 
     /// <summary>From a failed sign-in to registration.</summary>
-    CreateAccountInstead
+    CreateAccountInstead,
+
+    /// <summary>Back to the form, with what the user typed kept, to change it.  Every failure screen offers it.</summary>
+    Back
 }
 
 /// <summary>
@@ -47,8 +50,15 @@ public static class PasskeyRecovery
     /// <param name="error">The normalized error.</param>
     /// <param name="flow">The flow that failed.</param>
     /// <param name="configuration">The app's configuration.</param>
-    /// <returns>The plan.  Whenever the app has an alternative path, the plan offers it.</returns>
-    public static PasskeyRecoveryPlan For(PasskeyError error, PasskeyFlow flow, PasskeyConfiguration configuration)
+    /// <param name="typedInput">
+    /// Whether the ceremony used what the user typed (a username, the sign-up fields).  An error caused by that input
+    /// isn't offered as "try again", which would send the same input; the user goes back to the form to change it.
+    /// </param>
+    /// <returns>
+    /// The plan.  Every plan that isn't quiet ends with <see cref="PasskeyRecoveryAction.Back"/>, so no failure screen is
+    /// a dead end, and whenever the app has an alternative path, the plan offers it.
+    /// </returns>
+    public static PasskeyRecoveryPlan For(PasskeyError error, PasskeyFlow flow, PasskeyConfiguration configuration, bool typedInput = false)
     {
         ArgumentNullException.ThrowIfNull(error);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -82,7 +92,10 @@ public static class PasskeyRecovery
                 // This device already holds a passkey for the account: signing in is the way forward.
                 break;
             default:
-                actions.Add(PasskeyRecoveryAction.TryAgain);
+                if (!(typedInput && CausedByInput(error.Category, flow)))
+                {
+                    actions.Add(PasskeyRecoveryAction.TryAgain);
+                }
                 break;
         }
 
@@ -98,6 +111,7 @@ public static class PasskeyRecovery
         {
             actions.Add(PasskeyRecoveryAction.UseAnotherWay);
         }
+        actions.Add(PasskeyRecoveryAction.Back);
         return new PasskeyRecoveryPlan(title, error.Message, hint, actions, false);
     }
 
@@ -108,6 +122,15 @@ public static class PasskeyRecovery
     {
         ArgumentNullException.ThrowIfNull(configuration);
         return configuration.Features.EnableRegistration && configuration.Experience.OfferRegistration;
+    }
+
+    // Errors the user's own input can cause: a refused username or sign-up field, a username with no passkey here, and
+    // (registration) a sign-up the backend refused.  Sending the same input again can't help.
+    private static bool CausedByInput(PasskeyErrorCategory category, PasskeyFlow flow)
+    {
+        return category == PasskeyErrorCategory.InvalidOptions
+            || category == PasskeyErrorCategory.NoCredentials
+            || (flow == PasskeyFlow.Registration && category == PasskeyErrorCategory.ServerVerificationFailed);
     }
 
     // A device that can't do passkeys at all can't sign in with one either.

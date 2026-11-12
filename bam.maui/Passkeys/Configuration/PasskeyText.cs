@@ -101,6 +101,9 @@ public sealed class PasskeyText
     /// <summary>The recovery button that runs the ceremony again.</summary>
     public string TryAgain { get; set; } = "Try again";
 
+    /// <summary>The failure screen's way back to the form.</summary>
+    public string Back { get; set; } = "Back";
+
     /// <summary>The recovery note telling the user what to set up, for a device that needs it.</summary>
     public string DeviceSetupHint { get; set; } = "Open your device settings, then come back and try again.";
 

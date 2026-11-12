@@ -1,4 +1,5 @@
 using Bam.DependencyInjection;
+using Bam.Logging;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Bam.Maui.Passkeys;
@@ -24,10 +25,11 @@ public static class PasskeyUiRegistration
             throw new InvalidOperationException("Call AddPasskeyClient before AddPasskeyUi: the screens need the passkey configuration and client.");
         }
         PasskeyConfiguration configuration = registry.Get<PasskeyConfiguration>();
+        ILogger? logger = registry.Contains<ILogger>() ? registry.Get<ILogger>() : null;
         registry.For<IPasskeyNavigator>().UseSingleton(navigator);
         registry.For<PasskeyTheme>().UseSingleton(new PasskeyTheme(configuration.Branding));
-        registry.For<PasskeySignInViewModel>().Use<PasskeySignInViewModel>(r => new PasskeySignInViewModel(r.Get<IPasskeyClient>(), configuration, r.Get<IPasskeyNavigator>()));
-        registry.For<PasskeyRegistrationViewModel>().Use<PasskeyRegistrationViewModel>(r => new PasskeyRegistrationViewModel(r.Get<IPasskeyClient>(), configuration, r.Get<IPasskeyNavigator>()));
+        registry.For<PasskeySignInViewModel>().Use<PasskeySignInViewModel>(r => new PasskeySignInViewModel(r.Get<IPasskeyClient>(), configuration, r.Get<IPasskeyNavigator>(), logger));
+        registry.For<PasskeyRegistrationViewModel>().Use<PasskeyRegistrationViewModel>(r => new PasskeyRegistrationViewModel(r.Get<IPasskeyClient>(), configuration, r.Get<IPasskeyNavigator>(), logger));
         registry.For<PasskeySignInView>().Use<PasskeySignInView>(r => new PasskeySignInView(r.Get<PasskeySignInViewModel>(), r.Get<PasskeyTheme>()));
         registry.For<PasskeyRegistrationView>().Use<PasskeyRegistrationView>(r => new PasskeyRegistrationView(r.Get<PasskeyRegistrationViewModel>(), r.Get<PasskeyTheme>()));
         registry.For<PasskeySignInPage>().Use<PasskeySignInPage>(r => new PasskeySignInPage(r.Get<PasskeySignInView>()));

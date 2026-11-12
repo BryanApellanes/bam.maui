@@ -10,11 +10,25 @@ public sealed class FakePasskeyNavigator : IPasskeyNavigator
     public PasskeyFlow? SignedInFrom { get; private set; }
     public string Joined => string.Join(",", Calls);
 
+    /// <summary>Thrown by SignedInAsync while set, as an app's broken navigation would.</summary>
+    public Exception? SignedInFailure { get; set; }
+
+    /// <summary>Thrown by RegistrationRequestedAsync while set.</summary>
+    public Exception? RegistrationFailure { get; set; }
+
+    /// <summary>Runs inside SignedInAsync, while the screen is still on its success state.</summary>
+    public Action? WhileSignedIn { get; set; }
+
     public Task SignedInAsync(PasskeySignIn signIn, PasskeyFlow flow)
     {
         Calls.Add("signedIn");
+        if (SignedInFailure is not null)
+        {
+            return Task.FromException(SignedInFailure);
+        }
         SignedIn = signIn;
         SignedInFrom = flow;
+        WhileSignedIn?.Invoke();
         return Task.CompletedTask;
     }
 
@@ -27,6 +41,10 @@ public sealed class FakePasskeyNavigator : IPasskeyNavigator
     public Task RegistrationRequestedAsync()
     {
         Calls.Add("registration");
+        if (RegistrationFailure is not null)
+        {
+            throw RegistrationFailure;
+        }
         return Task.CompletedTask;
     }
 

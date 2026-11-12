@@ -78,15 +78,84 @@ public class PasskeyRecoveryShould : UnitTestMenuContainer
         .TheTest
         .ShouldPass<AlternativesOutcome>((because, outcome) =>
         {
-            because.ItsTrue("a network failure offers try again, then the other way: " + outcome.Network, outcome.Network == "TryAgain,UseAnotherWay");
-            because.ItsTrue("an unsupported device still offers the other way: " + outcome.Unavailable, outcome.Unavailable == "UseAnotherWay");
+            because.ItsTrue("a network failure offers try again, then the other way, then back: " + outcome.Network, outcome.Network == "TryAgain,UseAnotherWay,Back");
+            because.ItsTrue("an unsupported device still offers the other way: " + outcome.Unavailable, outcome.Unavailable == "UseAnotherWay,Back");
             because.ItsTrue("a cancellation offers nothing, even with an alternative", outcome.CancelledActions == 0);
-            because.ItsTrue("no create-account offer when the experience hides it: " + outcome.NotOffered, outcome.NotOffered == "TryAgain");
-            because.ItsTrue("no create-account offer when registration is off: " + outcome.RegistrationOff, outcome.RegistrationOff == "TryAgain");
-            because.ItsTrue("no sign-in offer when authentication is off: " + outcome.AuthenticationOff, outcome.AuthenticationOff == "TryAgain");
+            because.ItsTrue("no create-account offer when the experience hides it: " + outcome.NotOffered, outcome.NotOffered == "TryAgain,Back");
+            because.ItsTrue("no create-account offer when registration is off: " + outcome.RegistrationOff, outcome.RegistrationOff == "TryAgain,Back");
+            because.ItsTrue("no sign-in offer when authentication is off: " + outcome.AuthenticationOff, outcome.AuthenticationOff == "TryAgain,Back");
             because.ItsTrue("registration is offered by default", outcome.OffersByDefault);
             because.ItsTrue("registration is not offered when the experience hides it", !outcome.OffersWhenHidden);
             because.ItsTrue("registration is not offered when it is off", !outcome.OffersWhenOff);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    [UnitTest]
+    public void NeverLeaveADeadEnd()
+    {
+        After.Setup(reg => reg.Set(PasskeyClientFixture.ValidConfiguration()))
+        .When<PasskeyConfiguration>("plans every category, flow, typed input and alternative, with and without registration", (configuration, reg) =>
+        {
+            List<string> deadEnds = new List<string>();
+            PasskeyConfiguration withAlternative = PasskeyClientFixture.ValidConfiguration();
+            withAlternative.Experience.AlternativeSignInLabel = "Email me a link";
+            PasskeyConfiguration bare = PasskeyClientFixture.ValidConfiguration();
+            bare.Features.EnableRegistration = false;
+            foreach (PasskeyConfiguration candidate in new[] { configuration, withAlternative, bare })
+            {
+                foreach (PasskeyErrorCategory category in Enum.GetValues<PasskeyErrorCategory>())
+                {
+                    foreach (PasskeyFlow flow in Enum.GetValues<PasskeyFlow>())
+                    {
+                        foreach (bool typed in new[] { false, true })
+                        {
+                            PasskeyRecoveryPlan plan = PasskeyRecovery.For(new PasskeyError(category, "x"), flow, candidate, typed);
+                            if (!plan.IsQuiet && (plan.Actions.Count == 0 || plan.Actions[plan.Actions.Count - 1] != PasskeyRecoveryAction.Back))
+                            {
+                                deadEnds.Add($"{flow}/{category}/typed={typed}: [{Actions(plan)}]");
+                            }
+                        }
+                    }
+                }
+            }
+            return new DeadEndOutcome(string.Join("; ", deadEnds));
+        })
+        .TheTest
+        .ShouldPass<DeadEndOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("every failure screen ends with back: " + outcome.DeadEnds, outcome.DeadEnds.Length == 0);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    [UnitTest]
+    public void NotReplayInputTheUserMustChange()
+    {
+        After.Setup(reg => reg.Set(PasskeyClientFixture.ValidConfiguration()))
+        .When<PasskeyConfiguration>("plans input-shaped and other failures with and without typed input", (configuration, reg) =>
+        {
+            return new TypedInputOutcome(
+                Plan(PasskeyErrorCategory.InvalidOptions, PasskeyFlow.Registration, configuration, true),
+                Plan(PasskeyErrorCategory.ServerVerificationFailed, PasskeyFlow.Registration, configuration, true),
+                Plan(PasskeyErrorCategory.ServerVerificationFailed, PasskeyFlow.SignIn, configuration, true),
+                Plan(PasskeyErrorCategory.NoCredentials, PasskeyFlow.SignIn, configuration, true),
+                Plan(PasskeyErrorCategory.InvalidOptions, PasskeyFlow.SignIn, configuration, true),
+                Plan(PasskeyErrorCategory.NetworkFailure, PasskeyFlow.Registration, configuration, true),
+                Plan(PasskeyErrorCategory.InvalidOptions, PasskeyFlow.Registration, configuration, false));
+        })
+        .TheTest
+        .ShouldPass<TypedInputOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("a refused sign-up field goes back to the form: " + outcome.RegistrationRefusedField, outcome.RegistrationRefusedField == "SignInInstead,Back");
+            because.ItsTrue("a refused sign-up goes back to the form: " + outcome.RegistrationRefused, outcome.RegistrationRefused == "SignInInstead,Back");
+            because.ItsTrue("a failed sign-in verification can still be tried again: " + outcome.SignInVerification, outcome.SignInVerification == "TryAgain,Back");
+            because.ItsTrue("a typed username with no passkey goes back to the form: " + outcome.TypedNoCredentials, outcome.TypedNoCredentials == "CreateAccountInstead,Back");
+            because.ItsTrue("a refused typed username goes back to the form: " + outcome.TypedRefused, outcome.TypedRefused == "Back");
+            because.ItsTrue("a network failure is still tried again with typed input: " + outcome.TypedNetwork, outcome.TypedNetwork == "TryAgain,SignInInstead,Back");
+            because.ItsTrue("without typed input, try again stays: " + outcome.UntypedRefused, outcome.UntypedRefused == "TryAgain,SignInInstead,Back");
         })
         .SoBeHappy()
         .UnlessItFailed();
@@ -123,13 +192,18 @@ public class PasskeyRecoveryShould : UnitTestMenuContainer
         return category switch
         {
             PasskeyErrorCategory.UserCancelled => $"quiet|{string.Empty}|{text.Cancelled}|-|",
-            PasskeyErrorCategory.UnsupportedOperatingSystem or PasskeyErrorCategory.FeatureDisabled => $"loud|{text.UnavailableTitle}|{message}|-|",
-            PasskeyErrorCategory.MissingCredentialProvider or PasskeyErrorCategory.DeviceSecurityNotConfigured => $"loud|{text.DeviceSetupTitle}|{message}|{text.DeviceSetupHint}|TryAgain{signInInstead}",
-            PasskeyErrorCategory.NetworkFailure => $"loud|{text.NetworkTitle}|{message}|-|TryAgain{signInInstead}",
-            PasskeyErrorCategory.CredentialAlreadyRegistered => $"loud|{failed}|{message}|-|{signInInstead.TrimStart(',')}",
-            PasskeyErrorCategory.NoCredentials when flow == PasskeyFlow.SignIn => $"loud|{failed}|{message}|-|TryAgain,CreateAccountInstead",
-            _ => $"loud|{failed}|{message}|-|TryAgain{signInInstead}"
+            PasskeyErrorCategory.UnsupportedOperatingSystem or PasskeyErrorCategory.FeatureDisabled => $"loud|{text.UnavailableTitle}|{message}|-|Back",
+            PasskeyErrorCategory.MissingCredentialProvider or PasskeyErrorCategory.DeviceSecurityNotConfigured => $"loud|{text.DeviceSetupTitle}|{message}|{text.DeviceSetupHint}|TryAgain{signInInstead},Back",
+            PasskeyErrorCategory.NetworkFailure => $"loud|{text.NetworkTitle}|{message}|-|TryAgain{signInInstead},Back",
+            PasskeyErrorCategory.CredentialAlreadyRegistered => $"loud|{failed}|{message}|-|{signInInstead.TrimStart(',')}{(signInInstead.Length > 0 ? "," : string.Empty)}Back",
+            PasskeyErrorCategory.NoCredentials when flow == PasskeyFlow.SignIn => $"loud|{failed}|{message}|-|TryAgain,CreateAccountInstead,Back",
+            _ => $"loud|{failed}|{message}|-|TryAgain{signInInstead},Back"
         };
+    }
+
+    private static string Plan(PasskeyErrorCategory category, PasskeyFlow flow, PasskeyConfiguration configuration, bool typed)
+    {
+        return Actions(PasskeyRecovery.For(new PasskeyError(category, "x"), flow, configuration, typed));
     }
 
     private static string Describe(PasskeyRecoveryPlan plan)
@@ -158,6 +232,11 @@ public class PasskeyRecoveryShould : UnitTestMenuContainer
     private sealed record EveryCategoryOutcome(string Wrong);
 
     private sealed record AlternativesOutcome(string Network, string Unavailable, int CancelledActions, string NotOffered, string RegistrationOff, string AuthenticationOff, bool OffersByDefault, bool OffersWhenHidden, bool OffersWhenOff);
+
+    private sealed record DeadEndOutcome(string DeadEnds);
+
+    private sealed record TypedInputOutcome(string RegistrationRefusedField, string RegistrationRefused, string SignInVerification, string TypedNoCredentials, string TypedRefused,
+        string TypedNetwork, string UntypedRefused);
 
     private sealed record NullOutcome(bool NullError, bool NullConfiguration, bool NullOffers);
 }

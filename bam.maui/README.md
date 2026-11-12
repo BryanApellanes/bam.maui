@@ -245,19 +245,21 @@ builder.Services.AddBamPasskeyUi(registry, new MyNavigator());   // after AddBam
 - **Sign-in.** `PasskeyExperience.SignInMode` picks the layout: `UsernameLess` (one passkey button), `UsernameFirst` (a username field and Continue), or `Choice` (both, the default). With `EnableUsernameLessAuthentication` off, the screen is always username-first. The page checks the device each time it appears; a device that can't do passkeys gets the unavailable or device-setup screen, and the sign-in buttons stay off.
 - **Registration.** What a passkey is and why to use one, the username and name fields, and optional email and invite code fields (`AskForEmail`, `AskForInviteCode`). Only the fields the screen shows are sent. The success screen shows only after the backend has verified the new credential; its Continue button calls `SignedInAsync`.
 - **Progress.** While the system prompt is up the screen shows the working text and a Cancel button, which cancels the ceremony.
+- **After success.** Sign-in goes back to the form as soon as the app's `SignedInAsync` returns, and again whenever the page appears, so a cached page the app returns to after sign-out isn't blank. Registration clears its fields after Done.
+- **The app's navigation failing.** If an `IPasskeyNavigator` call throws, the screen catches it, logs the exception type (never its text), and shows an `Unknown` failure whose Try again makes the same call again. Nothing throws through a command.
 - **Errors.** `PasskeyRecovery.For(error, flow, configuration)` decides what a failure screen shows. It's one pure function, so every category's screen is decided in one place:
 
-| Failure | Heading | Ways out |
+| Failure | Heading | Ways out (all end with Back) |
 |---|---|---|
 | `UserCancelled` | None: the form stays, with a short note | |
-| `UnsupportedOperatingSystem`, `FeatureDisabled` | Unavailable | |
+| `UnsupportedOperatingSystem`, `FeatureDisabled` | Unavailable | Back |
 | `MissingCredentialProvider`, `DeviceSecurityNotConfigured` | Device setup, with a hint | Try again |
 | `NetworkFailure` | Offline | Try again |
 | `CredentialAlreadyRegistered` | Couldn't create the passkey | Sign in instead |
 | `NoCredentials` when signing in | Couldn't sign in | Try again, create an account |
 | Anything else | Couldn't sign in / create the passkey | Try again |
 
-Registration failures also offer "sign in instead" when authentication is on (except on a device that can't do passkeys). Every failure screen offers the app's other way in when `AlternativeSignInLabel` is set.
+Back returns to the form with what the user typed kept. Every failure screen offers it, so none is a dead end. When the failure came from what the user typed (`InvalidOptions`, `NoCredentials`, or a refused sign-up, `ServerVerificationFailed`, in registration), Try again isn't offered, because it would send the same input. The user goes Back, changes it, and submits again. Registration failures also offer "sign in instead" when authentication is on (except on a device that can't do passkeys). Every failure screen offers the app's other way in when `AlternativeSignInLabel` is set.
 
 **Wording.** `PasskeyText` holds every string the screens show. `{0}` in a heading is the app name. Replace members to reword or translate; each must have text. Error messages still come from `PasskeyMessages`.
 

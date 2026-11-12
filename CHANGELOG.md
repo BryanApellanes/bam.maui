@@ -12,7 +12,16 @@ Added
 - `PasskeyTheme` and `PasskeyResourceKeys`: the brand as a `ResourceDictionary`, light and dark, following the device when `ThemeMode` is `System`, with black or white text on the primary colour by WCAG contrast.
 - `PasskeyText` (every on-screen string, validated) and `PasskeyExperience` (`SignInMode`, `AlternativeSignInLabel`, `OfferRegistration`, `AskForEmail`, `AskForInviteCode`), both on `PasskeyConfiguration`.
 - `AddPasskeyUi` and `AddBamPasskeyUi`.
-- 17 unit tests (65 in all): suites `pkrc`, `pksi`, `pkrv`, `pkth`, plus screen-text and screen-registration tests in `pkcf` and `pkrg`.
+- 17 unit tests (65 at the first review): suites `pkrc`, `pksi`, `pkrv`, `pkth`, plus screen-text and screen-registration tests in `pkcf` and `pkrg`.
+
+Review round 1 (bam.maui#16)
+- Every failure screen ends with Back (`PasskeyRecoveryAction.Back`, `BackCommand`, `PasskeyText.Back`), which returns to the form with the fields kept. No failure screen is a dead end, and a test checks every category, flow and configuration for it.
+- `PasskeyRecovery.For` takes `typedInput`. A failure caused by what the user typed (`InvalidOptions`, `NoCredentials`, and a refused sign-up in registration) no longer offers Try again, which sent the same username or fields again. The user goes Back and changes them.
+- Sign-in goes back to the form once the app's `SignedInAsync` returns, and when the page appears again. A cached page shown after sign-out was blank. Registration clears its fields after Done.
+- A failure in the app's `IPasskeyNavigator` is caught, logged by exception type, and shown as an `Unknown` failure whose Try again repeats the call. It used to escape `async void` and crash the app, or leave a blank success screen. Back from a failed Done returns to the success screen, because the account exists. The screens take an optional `ILogger`, which `AddPasskeyUi` passes when the registry has one.
+- `ShowsForm` is removed (no view used it). `Dismiss` refreshes the commands.
+- `IPasskeyClient` says that `PasskeyError.Message` is shown to the user as it is, so another implementation must take it from configured text.
+- 6 more unit tests (71 in all).
 
 Fixed (nit from the bam.maui#9 review)
 - A transport failure while the caller's own token is cancelled is reported as a cancellation, not `NetworkFailure`. Some handlers fail the body read with an `IOException` instead of an `OperationCanceledException` when the request is aborted.

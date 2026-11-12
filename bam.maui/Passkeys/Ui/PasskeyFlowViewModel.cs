@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using Bam.Logging;
 
 namespace Bam.Maui.Passkeys;
 
@@ -31,21 +32,26 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     private string? _note;
     private CancellationTokenSource? _ceremony;
     private Func<Task>? _lastAttempt;
+    private bool _typedInput;
+    private readonly ILogger? _logger;
 
     /// <summary>Creates the view model.</summary>
     /// <param name="client">The passkey client.</param>
     /// <param name="configuration">The app's configuration.</param>
     /// <param name="navigator">The app's navigation.</param>
-    protected PasskeyFlowViewModel(IPasskeyClient client, PasskeyConfiguration configuration, IPasskeyNavigator navigator)
+    /// <param name="logger">Where a failure in the app's navigation is logged (by exception type only), or null.</param>
+    protected PasskeyFlowViewModel(IPasskeyClient client, PasskeyConfiguration configuration, IPasskeyNavigator navigator, ILogger? logger = null)
     {
         Client = client ?? throw new ArgumentNullException(nameof(client));
         Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         Navigator = navigator ?? throw new ArgumentNullException(nameof(navigator));
+        _logger = logger;
         CancelCommand = new PasskeyCommand(CancelAsync, () => _ceremony is not null);
         TryAgainCommand = new PasskeyCommand(TryAgainAsync, () => _lastAttempt is not null && State != PasskeyViewState.Working);
-        UseAnotherWayCommand = new PasskeyCommand(() => Navigator.AlternativeSignInRequestedAsync(), () => HasAlternative && State != PasskeyViewState.Working);
-        GoToRegistrationCommand = new PasskeyCommand(() => Navigator.RegistrationRequestedAsync(), () => PasskeyRecovery.OffersRegistration(Configuration) && State != PasskeyViewState.Working);
-        GoToSignInCommand = new PasskeyCommand(() => Navigator.SignInRequestedAsync(), () => Configuration.Features.EnableAuthentication && State != PasskeyViewState.Working);
+        BackCommand = new PasskeyCommand(BackAsync, () => State == PasskeyViewState.Failed);
+        UseAnotherWayCommand = new PasskeyCommand(() => NavigateAsync(() => Navigator.AlternativeSignInRequestedAsync()), () => HasAlternative && State != PasskeyViewState.Working);
+        GoToRegistrationCommand = new PasskeyCommand(() => NavigateAsync(() => Navigator.RegistrationRequestedAsync()), () => PasskeyRecovery.OffersRegistration(Configuration) && State != PasskeyViewState.Working);
+        GoToSignInCommand = new PasskeyCommand(() => NavigateAsync(() => Navigator.SignInRequestedAsync()), () => Configuration.Features.EnableAuthentication && State != PasskeyViewState.Working);
     }
 
     /// <inheritdoc />
@@ -84,7 +90,6 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
                 OnPropertyChanged(nameof(IsWorking));
                 OnPropertyChanged(nameof(HasSucceeded));
                 OnPropertyChanged(nameof(HasFailed));
-                OnPropertyChanged(nameof(ShowsForm));
                 OnStateChanged();
             }
         }
@@ -102,9 +107,6 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     /// <summary>Whether the ceremony failed.</summary>
     public bool HasFailed => State == PasskeyViewState.Failed;
 
-    /// <summary>Whether the form is showing: ready, or working with the form behind the progress.</summary>
-    public bool ShowsForm => State == PasskeyViewState.Ready || State == PasskeyViewState.Working;
-
     /// <summary>What to offer after a failure, or null.</summary>
     public PasskeyRecoveryPlan? Recovery
     {
@@ -121,6 +123,7 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
                 OnPropertyChanged(nameof(OffersAnotherWay));
                 OnPropertyChanged(nameof(OffersSignInInstead));
                 OnPropertyChanged(nameof(OffersCreateAccountInstead));
+                OnPropertyChanged(nameof(OffersBack));
             }
         }
     }
@@ -148,6 +151,9 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
 
     /// <summary>Whether the error screen offers to create an account instead.</summary>
     public bool OffersCreateAccountInstead => Offers(PasskeyRecoveryAction.CreateAccountInstead);
+
+    /// <summary>Whether the error screen offers the way back to the form (every failure screen does).</summary>
+    public bool OffersBack => Offers(PasskeyRecoveryAction.Back);
 
     /// <summary>A quiet line on the ready screen (after a dismissed prompt), or null.</summary>
     public string? Note
@@ -180,6 +186,9 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     /// <summary>Runs the last attempt again.</summary>
     public PasskeyCommand TryAgainCommand { get; }
 
+    /// <summary>Leaves the error screen for the form, with what the user typed kept (see <see cref="Dismiss"/>).</summary>
+    public PasskeyCommand BackCommand { get; }
+
     /// <summary>Hands over to the app's other way to sign in.</summary>
     public PasskeyCommand UseAnotherWayCommand { get; }
 
@@ -189,14 +198,38 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     /// <summary>Hands over to the sign-in screen.</summary>
     public PasskeyCommand GoToSignInCommand { get; }
 
-    /// <summary>Clears an error and returns to the form.</summary>
+    /// <summary>
+    /// Clears an error and returns to where the user was before it: the form, with what they typed kept, or (see
+    /// <see cref="DismissedState"/>) a success screen whose navigation failed.
+    /// </summary>
     public void Dismiss()
     {
         if (State == PasskeyViewState.Failed)
         {
             Recovery = null;
-            State = PasskeyViewState.Ready;
+            State = DismissedState;
+            RaiseCommands();
         }
+    }
+
+    /// <summary>Where <see cref="Dismiss"/> returns to.  The form, unless a derived screen has somewhere better.</summary>
+    protected virtual PasskeyViewState DismissedState => PasskeyViewState.Ready;
+
+    /// <summary>
+    /// Puts a finished screen back to the form, for when it is shown again (a cached Shell page, a navigation root the
+    /// app returns to after sign-out).  Does nothing while a ceremony runs.
+    /// </summary>
+    protected void Reset()
+    {
+        if (State == PasskeyViewState.Working)
+        {
+            return;
+        }
+        Recovery = null;
+        Note = null;
+        _lastAttempt = null;
+        State = PasskeyViewState.Ready;
+        RaiseCommands();
     }
 
     /// <summary>
@@ -205,9 +238,13 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     /// </summary>
     /// <typeparam name="TValue">What the ceremony returns.</typeparam>
     /// <param name="ceremony">The client call.</param>
-    /// <param name="succeeded">What to do with a verified result.</param>
+    /// <param name="succeeded">
+    /// What to do with a verified result.  It runs the app's navigation, so a failure in it is caught, logged and shown
+    /// as a failure whose "try again" runs it again; it never escapes to the command.
+    /// </param>
+    /// <param name="typedInput">Whether the ceremony uses what the user typed (see <see cref="PasskeyRecovery.For"/>).</param>
     /// <returns>A task that completes when the ceremony and its follow-up are done.</returns>
-    protected async Task RunAsync<TValue>(Func<CancellationToken, Task<PasskeyResult<TValue>>> ceremony, Func<TValue, Task> succeeded)
+    protected async Task RunAsync<TValue>(Func<CancellationToken, Task<PasskeyResult<TValue>>> ceremony, Func<TValue, Task> succeeded, bool typedInput = false)
     {
         ArgumentNullException.ThrowIfNull(ceremony);
         ArgumentNullException.ThrowIfNull(succeeded);
@@ -215,7 +252,8 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
         {
             return;
         }
-        _lastAttempt = () => RunAsync(ceremony, succeeded);
+        _lastAttempt = () => RunAsync(ceremony, succeeded, typedInput);
+        _typedInput = typedInput;
         using CancellationTokenSource source = new CancellationTokenSource();
         _ceremony = source;
         Recovery = null;
@@ -241,10 +279,33 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
         {
             State = PasskeyViewState.Succeeded;
             RaiseCommands();
-            await succeeded(result.Value!);
+            TValue value = result.Value!;
+            await NavigateAsync(() => succeeded(value));
             return;
         }
         Fail(result.Error!);
+    }
+
+    /// <summary>
+    /// Runs one of the app's navigation calls.  A failure in it is caught, logged by exception type, and shown as an
+    /// <see cref="PasskeyErrorCategory.Unknown"/> failure whose "try again" makes the same call again.  The app's code
+    /// never throws through a command, where an <c>async void</c> handler would crash the app.
+    /// </summary>
+    /// <param name="navigate">The navigation call.</param>
+    /// <returns>A task that completes when the call has returned or failed.</returns>
+    protected async Task NavigateAsync(Func<Task> navigate)
+    {
+        ArgumentNullException.ThrowIfNull(navigate);
+        try
+        {
+            await navigate();
+        }
+        catch (Exception failed)
+        {
+            _logger?.Warning("Passkey {0} screen: the app's navigation failed: exception {1}.", Flow.ToString(), failed.GetType().Name);
+            _typedInput = false;
+            Fail(new PasskeyError(PasskeyErrorCategory.Unknown, Configuration.Messages.For(PasskeyErrorCategory.Unknown)), () => NavigateAsync(navigate));
+        }
     }
 
     /// <summary>Shows a failure that didn't come from a ceremony, such as a device that can't do passkeys.</summary>
@@ -252,6 +313,7 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     /// <param name="retry">What <see cref="TryAgainCommand"/> runs, or null to keep the last attempt.</param>
     protected void Fail(PasskeyError error, Func<Task>? retry)
     {
+        _typedInput = false;
         if (retry is not null)
         {
             _lastAttempt = retry;
@@ -261,7 +323,7 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
 
     private void Fail(PasskeyError error)
     {
-        PasskeyRecoveryPlan plan = PasskeyRecovery.For(error, Flow, Configuration);
+        PasskeyRecoveryPlan plan = PasskeyRecovery.For(error, Flow, Configuration, _typedInput);
         if (plan.IsQuiet)
         {
             Recovery = null;
@@ -286,6 +348,7 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     {
         CancelCommand.RaiseCanExecuteChanged();
         TryAgainCommand.RaiseCanExecuteChanged();
+        BackCommand.RaiseCanExecuteChanged();
         UseAnotherWayCommand.RaiseCanExecuteChanged();
         GoToRegistrationCommand.RaiseCanExecuteChanged();
         GoToSignInCommand.RaiseCanExecuteChanged();
@@ -323,6 +386,12 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     private Task CancelAsync()
     {
         _ceremony?.Cancel();
+        return Task.CompletedTask;
+    }
+
+    private Task BackAsync()
+    {
+        Dismiss();
         return Task.CompletedTask;
     }
 

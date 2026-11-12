@@ -29,8 +29,10 @@ public class PasskeyRegistrationViewModelShould : UnitTestMenuContainer
             PasskeyViewState afterCreate = screen.State;
             bool doneAfter = screen.DoneCommand.CanExecute(null);
             Wait(screen.DoneCommand.ExecuteAsync());
+            string cleared = screen.Handle + screen.DisplayName + screen.Email + screen.InviteCode;
             return new VerifiedOutcome(createBlank, createWithoutName, createReady, doneBefore, fixture.Log.Joined, afterCreate, navigatorAfterCreate,
-                doneAfter, navigator.Joined, navigator.SignedIn?.Handle, navigator.SignedInFrom, screen.SuccessTitle, screen.Title, screen.Benefits.Count);
+                doneAfter, navigator.Joined, navigator.SignedIn?.Handle, navigator.SignedInFrom, screen.SuccessTitle, screen.Title, screen.Benefits.Count,
+                screen.State, cleared, screen.DoneCommand.CanExecute(null));
         })
         .TheTest
         .ShouldPass<VerifiedOutcome>((because, outcome) =>
@@ -49,6 +51,9 @@ public class PasskeyRegistrationViewModelShould : UnitTestMenuContainer
             because.ItsTrue("the success heading carries the app name: " + outcome.SuccessTitle, outcome.SuccessTitle == "Your Example account is ready");
             because.ItsTrue("the heading carries the app name: " + outcome.Title, outcome.Title == "Create your Example account");
             because.ItsTrue("the benefits show", outcome.Benefits > 0);
+            because.ItsTrue("after done the screen is back on the form", outcome.AfterDone == PasskeyViewState.Ready);
+            because.ItsTrue("with nothing of the account left on it: [" + outcome.Cleared + "]", outcome.Cleared.Length == 0);
+            because.ItsTrue("and done can't run again", !outcome.DoneAgain);
         })
         .SoBeHappy()
         .UnlessItFailed();
@@ -68,7 +73,7 @@ public class PasskeyRegistrationViewModelShould : UnitTestMenuContainer
             Wait(screen.CreateCommand.ExecuteAsync());
             Wait(screen.DoneCommand.ExecuteAsync());
             return new RefusedOutcome(screen.State, screen.HasSucceeded, screen.DoneCommand.CanExecute(null), navigator.Joined, screen.ErrorTitle,
-                screen.OffersTryAgain, screen.OffersSignInInstead, screen.OffersCreateAccountInstead, fixture.Configuration.Text.RegistrationFailedTitle);
+                screen.OffersTryAgain, screen.OffersSignInInstead, screen.OffersCreateAccountInstead, fixture.Configuration.Text.RegistrationFailedTitle, screen.OffersBack);
         })
         .TheTest
         .ShouldPass<RefusedOutcome>((because, outcome) =>
@@ -77,7 +82,8 @@ public class PasskeyRegistrationViewModelShould : UnitTestMenuContainer
             because.ItsTrue("done can't run", !outcome.DoneEnabled);
             because.ItsTrue("nothing navigates: " + outcome.NavigatorCalls, outcome.NavigatorCalls.Length == 0);
             because.ItsTrue("the heading is the registration failure heading: " + outcome.Title, outcome.Title == outcome.ExpectedTitle);
-            because.ItsTrue("try again and sign in instead are offered", outcome.TryAgain && outcome.SignInInstead);
+            because.ItsTrue("a refused sign-up isn't sent again as it is: back to the form instead", !outcome.TryAgain && outcome.Back);
+            because.ItsTrue("sign in instead is offered", outcome.SignInInstead);
             because.ItsTrue("create-account is not offered on the registration screen", !outcome.CreateAccount);
         })
         .SoBeHappy()
@@ -166,16 +172,103 @@ public class PasskeyRegistrationViewModelShould : UnitTestMenuContainer
         .UnlessItFailed();
     }
 
+    [UnitTest]
+    public void LetTheUserChangeARefusedUsername()
+    {
+        After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
+        .When<ScriptedPasskeyClient>("creates an account whose username is taken, goes back, changes it and creates again", (client, reg) =>
+        {
+            PasskeyRegistrationViewModel screen = new PasskeyRegistrationViewModel(client, PasskeyClientFixture.ValidConfiguration(), new FakePasskeyNavigator());
+            screen.Handle = "ada";
+            screen.DisplayName = "Ada";
+            client.SignInResults.Enqueue(PasskeyResult<PasskeySignIn>.Failure(new PasskeyError(PasskeyErrorCategory.InvalidOptions, "taken", "HandleTaken")));
+            Wait(screen.CreateCommand.ExecuteAsync());
+            bool tryAgain = screen.OffersTryAgain;
+            bool back = screen.OffersBack;
+            Wait(screen.BackCommand.ExecuteAsync());
+            RefusedForm form = new RefusedForm(screen.State, screen.Handle, screen.DisplayName, screen.CreateCommand.CanExecute(null));
+            screen.Handle = "ada.l";
+            Wait(screen.CreateCommand.ExecuteAsync());
+            return new ChangedOutcome(tryAgain, back, form, client.LastRequest?.Handle, screen.State);
+        })
+        .TheTest
+        .ShouldPass<ChangedOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("a taken username isn't tried again as it is", !outcome.TryAgain);
+            because.ItsTrue("back is offered", outcome.Back);
+            because.ItsTrue("back returns to the form", outcome.Form.State == PasskeyViewState.Ready);
+            because.ItsTrue("with the fields kept", outcome.Form.Handle == "ada" && outcome.Form.DisplayName == "Ada");
+            because.ItsTrue("and create can run", outcome.Form.CreateEnabled);
+            because.ItsTrue("the changed username is the one sent: " + outcome.SentHandle, outcome.SentHandle == "ada.l");
+            because.ItsTrue("and the account is created", outcome.Final == PasskeyViewState.Succeeded);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    [UnitTest]
+    public void KeepTheAccountWhenTheAppsNavigationFails()
+    {
+        After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
+        .When<ScriptedPasskeyClient>("leaves the success screen while the app's navigation throws, goes back, then leaves once it works", (client, reg) =>
+        {
+            FakePasskeyNavigator navigator = new FakePasskeyNavigator { SignedInFailure = new InvalidOperationException("route not found") };
+            PasskeyRegistrationViewModel screen = new PasskeyRegistrationViewModel(client, PasskeyClientFixture.ValidConfiguration(), navigator);
+            screen.Handle = "ada";
+            screen.DisplayName = "Ada";
+            Wait(screen.CreateCommand.ExecuteAsync());
+            string? escaped = null;
+            try
+            {
+                Wait(screen.DoneCommand.ExecuteAsync());
+            }
+            catch (Exception thrown)
+            {
+                escaped = thrown.GetType().Name;
+            }
+            PasskeyViewState afterFailedDone = screen.State;
+            bool tryAgain = screen.OffersTryAgain;
+            Wait(screen.BackCommand.ExecuteAsync());
+            PasskeyViewState afterBack = screen.State;
+            bool doneAfterBack = screen.DoneCommand.CanExecute(null);
+            navigator.SignedInFailure = null;
+            Wait(screen.DoneCommand.ExecuteAsync());
+            return new DoneFailureOutcome(escaped, afterFailedDone, tryAgain, afterBack, doneAfterBack, navigator.Joined, navigator.SignedIn?.Handle, screen.State,
+                client.Calls.Count(c => c == "register"));
+        })
+        .TheTest
+        .ShouldPass<DoneFailureOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("nothing escapes the command: " + outcome.Escaped, outcome.Escaped is null);
+            because.ItsTrue("a failed done shows a failure with try again", outcome.AfterFailedDone == PasskeyViewState.Failed && outcome.TryAgain);
+            because.ItsTrue("back returns to the success screen, not the form: the account exists", outcome.AfterBack == PasskeyViewState.Succeeded);
+            because.ItsTrue("where done can run", outcome.DoneAfterBack);
+            because.ItsTrue("done then reaches the app: " + outcome.NavigatorCalls, outcome.NavigatorCalls == "signedIn,signedIn" && outcome.SignedInHandle == "ada");
+            because.ItsTrue("and the screen is cleared", outcome.Final == PasskeyViewState.Ready);
+            because.ItsTrue("the account is created once", outcome.Registrations == 1);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
     private static void Wait(Task task)
     {
         task.GetAwaiter().GetResult();
     }
 
     private sealed record VerifiedOutcome(bool CreateBlank, bool CreateWithoutName, bool CreateReady, bool DoneBefore, string Log, PasskeyViewState AfterCreate, string NavigatorAfterCreate,
-        bool DoneAfter, string NavigatorCalls, string? SignedInHandle, PasskeyFlow? SignedInFrom, string SuccessTitle, string Title, int Benefits);
+        bool DoneAfter, string NavigatorCalls, string? SignedInHandle, PasskeyFlow? SignedInFrom, string SuccessTitle, string Title, int Benefits,
+        PasskeyViewState AfterDone, string Cleared, bool DoneAgain);
+
+    private sealed record RefusedForm(PasskeyViewState State, string Handle, string DisplayName, bool CreateEnabled);
+
+    private sealed record ChangedOutcome(bool TryAgain, bool Back, RefusedForm Form, string? SentHandle, PasskeyViewState Final);
+
+    private sealed record DoneFailureOutcome(string? Escaped, PasskeyViewState AfterFailedDone, bool TryAgain, PasskeyViewState AfterBack, bool DoneAfterBack, string NavigatorCalls,
+        string? SignedInHandle, PasskeyViewState Final, int Registrations);
 
     private sealed record RefusedOutcome(PasskeyViewState State, bool HasSucceeded, bool DoneEnabled, string NavigatorCalls, string Title, bool TryAgain, bool SignInInstead,
-        bool CreateAccount, string ExpectedTitle);
+        bool CreateAccount, string ExpectedTitle, bool Back);
 
     private sealed record FieldsOutcome(string Handle, string DisplayName, string? HiddenEmail, string? HiddenInvite, bool AsksEmailByDefault, bool AsksInviteByDefault,
         string? ShownEmail, string? ShownInvite, bool AsksEmail, bool AsksInvite, bool WhitespaceCreates, bool OffersSignIn);

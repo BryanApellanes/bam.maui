@@ -3,7 +3,7 @@ namespace Bam.Maui.Passkeys;
 /// <summary>
 /// The progress and error parts of a passkey screen, bound to a <see cref="PasskeyFlowViewModel"/>: a spinner and a
 /// cancel button while the system prompt is up, and after a failure the heading, the message, the hint and one button
-/// per recovery action.  A dismissed prompt never shows here; it is a note on the form.
+/// per recovery action, ending with the way back to the form.  A dismissed prompt never shows here; it is a note on the form.
 /// </summary>
 public sealed class PasskeyStatusView : ContentView
 {
@@ -44,6 +44,9 @@ public sealed class PasskeyStatusView : ContentView
             PasskeyViewParts.ShowWhen(another, nameof(PasskeyFlowViewModel.OffersAnotherWay));
             failure.Children.Add(another);
         }
+        Button back = PasskeyViewParts.Link(text.Back, nameof(PasskeyFlowViewModel.BackCommand));
+        PasskeyViewParts.ShowWhen(back, nameof(PasskeyFlowViewModel.OffersBack));
+        failure.Children.Add(back);
         PasskeyViewParts.ShowWhen(failure, nameof(PasskeyFlowViewModel.HasFailed));
 
         Content = new VerticalStackLayout { Spacing = 0, Children = { progress, failure } };

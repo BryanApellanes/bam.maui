@@ -1,3 +1,5 @@
+using Bam.Logging;
+
 namespace Bam.Maui.Passkeys;
 
 /// <summary>
@@ -14,8 +16,9 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
     /// <param name="client">The passkey client.</param>
     /// <param name="configuration">The app's configuration.</param>
     /// <param name="navigator">The app's navigation.</param>
-    public PasskeySignInViewModel(IPasskeyClient client, PasskeyConfiguration configuration, IPasskeyNavigator navigator)
-        : base(client, configuration, navigator)
+    /// <param name="logger">Where a failure in the app's navigation is logged, or null.</param>
+    public PasskeySignInViewModel(IPasskeyClient client, PasskeyConfiguration configuration, IPasskeyNavigator navigator, ILogger? logger = null)
+        : base(client, configuration, navigator, logger)
     {
         Mode = configuration.Experience.SignInModeFor(configuration.Features);
         SignInCommand = new PasskeyCommand(SignInAsync, () => ShowsPasskeyButton && CanStart);
@@ -69,12 +72,17 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
 
     /// <summary>
     /// Checks the device can do passkeys, without prompting.  Call it when the screen appears.  A device that can't
-    /// shows the unavailable or device-setup screen, and the sign-in buttons stay off.
+    /// shows the unavailable or device-setup screen, and the sign-in buttons stay off.  A screen shown again after a
+    /// sign-in (a cached page the app returns to after sign-out) is back on the form.
     /// </summary>
     /// <param name="cancellationToken">Cancels the probe.</param>
     /// <returns>A task that completes when the check is done.</returns>
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
+        if (State == PasskeyViewState.Succeeded)
+        {
+            Reset();
+        }
         PasskeyCapabilities capabilities = await Client.GetCapabilitiesAsync(cancellationToken);
         _passkeysAvailable = capabilities.IsSupported;
         if (capabilities.IsSupported)
@@ -100,12 +108,19 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
 
     private Task SignInAsync()
     {
-        return RunAsync(token => Client.AuthenticateAsync(token), signIn => Navigator.SignedInAsync(signIn, PasskeyFlow.SignIn));
+        return RunAsync(token => Client.AuthenticateAsync(token), SignedInAsync);
     }
 
     private Task ContinueAsync()
     {
         string handle = Handle.Trim();
-        return RunAsync(token => Client.AuthenticateWithUsernameAsync(handle, token), signIn => Navigator.SignedInAsync(signIn, PasskeyFlow.SignIn));
+        return RunAsync(token => Client.AuthenticateWithUsernameAsync(handle, token), SignedInAsync, typedInput: true);
+    }
+
+    // The app has moved on; the screen goes back to the form for when it is shown again.
+    private async Task SignedInAsync(PasskeySignIn signIn)
+    {
+        await Navigator.SignedInAsync(signIn, PasskeyFlow.SignIn);
+        Reset();
     }
 }
