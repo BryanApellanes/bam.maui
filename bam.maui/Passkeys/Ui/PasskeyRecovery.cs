@@ -54,11 +54,16 @@ public static class PasskeyRecovery
     /// Whether the ceremony used what the user typed (a username, the sign-up fields).  An error caused by that input
     /// isn't offered as "try again", which would send the same input; the user goes back to the form to change it.
     /// </param>
+    /// <param name="replacesForm">
+    /// Whether the failure came from the device check rather than a ceremony.  That screen takes the place of a form
+    /// whose passkey buttons can't work, so it doesn't offer Back: going back would hide the reason and the re-check.
+    /// </param>
     /// <returns>
-    /// The plan.  Every plan that isn't quiet ends with <see cref="PasskeyRecoveryAction.Back"/>, so no failure screen is
-    /// a dead end, and whenever the app has an alternative path, the plan offers it.
+    /// The plan.  Every plan that isn't quiet ends with <see cref="PasskeyRecoveryAction.Back"/> (except one that
+    /// <paramref name="replacesForm"/>), so no failure screen is a dead end, and whenever the app has an alternative
+    /// path, the plan offers it.
     /// </returns>
-    public static PasskeyRecoveryPlan For(PasskeyError error, PasskeyFlow flow, PasskeyConfiguration configuration, bool typedInput = false)
+    public static PasskeyRecoveryPlan For(PasskeyError error, PasskeyFlow flow, PasskeyConfiguration configuration, bool typedInput = false, bool replacesForm = false)
     {
         ArgumentNullException.ThrowIfNull(error);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -111,7 +116,10 @@ public static class PasskeyRecovery
         {
             actions.Add(PasskeyRecoveryAction.UseAnotherWay);
         }
-        actions.Add(PasskeyRecoveryAction.Back);
+        if (!replacesForm)
+        {
+            actions.Add(PasskeyRecoveryAction.Back);
+        }
         return new PasskeyRecoveryPlan(title, error.Message, hint, actions, false);
     }
 

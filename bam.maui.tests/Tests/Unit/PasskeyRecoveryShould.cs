@@ -117,6 +117,12 @@ public class PasskeyRecoveryShould : UnitTestMenuContainer
                                 deadEnds.Add($"{flow}/{category}/typed={typed}: [{Actions(plan)}]");
                             }
                         }
+                        // The device check's screen replaces a form that can't be used: no Back, but it always says why.
+                        PasskeyRecoveryPlan check = PasskeyRecovery.For(new PasskeyError(category, "x"), flow, candidate, false, true);
+                        if (!check.IsQuiet && (check.Actions.Contains(PasskeyRecoveryAction.Back) || check.Title.Length == 0 || check.Message.Length == 0))
+                        {
+                            deadEnds.Add($"{flow}/{category}/check: [{Actions(check)}] '{check.Title}'");
+                        }
                     }
                 }
             }
@@ -125,7 +131,7 @@ public class PasskeyRecoveryShould : UnitTestMenuContainer
         .TheTest
         .ShouldPass<DeadEndOutcome>((because, outcome) =>
         {
-            because.ItsTrue("every failure screen ends with back: " + outcome.DeadEnds, outcome.DeadEnds.Length == 0);
+            because.ItsTrue("every failure screen ends with back, and the device check's explains itself without one: " + outcome.DeadEnds, outcome.DeadEnds.Length == 0);
         })
         .SoBeHappy()
         .UnlessItFailed();

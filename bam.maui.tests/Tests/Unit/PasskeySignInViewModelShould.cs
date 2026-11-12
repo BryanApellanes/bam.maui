@@ -148,7 +148,7 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
     public void OfferRecoveryAfterAFailure()
     {
         After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
-        .When<ScriptedPasskeyClient>("fails with no credentials, tries again, and follows the create-account and other-way links", (client, reg) =>
+        .When<ScriptedPasskeyClient>("fails with no credentials, follows the create-account and other-way links, then signs in from the form", (client, reg) =>
         {
             FakePasskeyNavigator navigator = new FakePasskeyNavigator();
             PasskeyConfiguration configuration = PasskeyClientFixture.ValidConfiguration();
@@ -159,15 +159,17 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             FailedState failed = new FailedState(screen.State, screen.ErrorTitle, screen.ErrorMessage, screen.HasErrorHint, screen.OffersTryAgain,
                 screen.OffersCreateAccountInstead, screen.OffersAnotherWay, screen.OffersSignInInstead, screen.IsReady);
             Wait(screen.GoToRegistrationCommand.ExecuteAsync());
+            PasskeyViewState afterLink = screen.State;
             Wait(screen.UseAnotherWayCommand.ExecuteAsync());
-            Wait(screen.TryAgainCommand.ExecuteAsync());
+            bool tryAgainAfterLinks = screen.TryAgainCommand.CanExecute(null);
+            Wait(screen.SignInCommand.ExecuteAsync());
             PasskeyViewState afterRetry = screen.State;
 
             PasskeySignInViewModel dismissable = new PasskeySignInViewModel(client, configuration, new FakePasskeyNavigator());
             client.SignInResults.Enqueue(ScriptedPasskeyClient.Failed(PasskeyErrorCategory.ServerVerificationFailed));
             Wait(dismissable.SignInCommand.ExecuteAsync());
             dismissable.Dismiss();
-            return new RecoveryOutcome(failed, navigator.Joined, string.Join(",", client.Calls), afterRetry, configuration.Text.SignInFailedTitle,
+            return new RecoveryOutcome(failed, afterLink, tryAgainAfterLinks, navigator.Joined, string.Join(",", client.Calls), afterRetry, configuration.Text.SignInFailedTitle,
                 dismissable.State, dismissable.ErrorTitle, dismissable.UseAnotherWayCommand.CanExecute(null), dismissable.AlternativeLabel);
         })
         .TheTest
@@ -179,9 +181,11 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             because.ItsTrue("no hint for a missing passkey", !outcome.Failed.HasHint);
             because.ItsTrue("try again, create an account and the other way are offered", outcome.Failed.TryAgain && outcome.Failed.CreateAccount && outcome.Failed.AnotherWay);
             because.ItsTrue("sign-in-instead is not offered on the sign-in screen", !outcome.Failed.SignInInstead);
-            because.ItsTrue("the links reach the navigator, and the retry signs in: " + outcome.NavigatorCalls, outcome.NavigatorCalls == "registration,alternative,signedIn");
-            because.ItsTrue("try again runs the same ceremony: " + outcome.ClientCalls, outcome.ClientCalls.StartsWith("authenticate,authenticate", StringComparison.Ordinal));
-            because.ItsTrue("the retry signs in and the screen is back on the form", outcome.AfterRetry == PasskeyViewState.Ready);
+            because.ItsTrue("the links reach the navigator, and signing in again works: " + outcome.NavigatorCalls, outcome.NavigatorCalls == "registration,alternative,signedIn");
+            because.ItsTrue("a link that works clears the error: " + outcome.AfterLink, outcome.AfterLink == PasskeyViewState.Ready);
+            because.ItsTrue("and its try again with it", !outcome.TryAgainAfterLinks);
+            because.ItsTrue("signing in again runs the same ceremony: " + outcome.ClientCalls, outcome.ClientCalls.StartsWith("authenticate,authenticate", StringComparison.Ordinal));
+            because.ItsTrue("the sign-in works and the screen is back on the form", outcome.AfterRetry == PasskeyViewState.Ready);
             because.ItsTrue("dismissing an error returns to the form", outcome.DismissedState == PasskeyViewState.Ready && outcome.DismissedTitle.Length == 0);
             because.ItsTrue("the other way stays available on the form", outcome.AnotherWayOnForm);
             because.ItsTrue("the other way carries the app's label", outcome.AlternativeLabel == "Email me a link");
@@ -202,6 +206,10 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             screen.Handle = "ada";
             UnsupportedState missing = new UnsupportedState(screen.State, screen.ErrorTitle, screen.ErrorMessage, screen.HasErrorHint, screen.OffersTryAgain,
                 screen.SignInCommand.CanExecute(null), screen.ContinueCommand.CanExecute(null));
+            bool missingBack = screen.OffersBack || screen.BackCommand.CanExecute(null);
+            Wait(screen.BackCommand.ExecuteAsync());
+            UnsupportedState afterBack = new UnsupportedState(screen.State, screen.ErrorTitle, screen.ErrorMessage, screen.HasErrorHint, screen.OffersTryAgain,
+                screen.SignInCommand.CanExecute(null), screen.ContinueCommand.CanExecute(null));
             Wait(screen.SignInCommand.ExecuteAsync());
             int callsAfterBlockedSignIn = client.Calls.Count(c => c.StartsWith("authenticate", StringComparison.Ordinal));
 
@@ -213,7 +221,9 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             PasskeySignInViewModel old = new PasskeySignInViewModel(client, PasskeyClientFixture.ValidConfiguration(), new FakePasskeyNavigator());
             client.Capabilities = PasskeyCapabilities.Unsupported("Test");
             Wait(old.LoadAsync());
-            return new UnsupportedOutcome(missing, setUp, callsAfterBlockedSignIn, client.Calls.Count(c => c == "capabilities"),
+            bool oldBack = old.OffersBack || old.BackCommand.CanExecute(null);
+            Wait(old.BackCommand.ExecuteAsync());
+            return new UnsupportedOutcome(missing, missingBack, afterBack, setUp, oldBack, old.State, old.ErrorMessage, old.Configuration.Messages.UnsupportedOperatingSystem, callsAfterBlockedSignIn, client.Calls.Count(c => c == "capabilities"),
                 old.ErrorTitle, old.OffersTryAgain, old.SignInCommand.CanExecute(null), screen.Text.DeviceSetupTitle, screen.Text.UnavailableTitle,
                 screen.Configuration.Messages.MissingCredentialProvider);
         })
@@ -224,6 +234,8 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             because.ItsTrue("with the configured message", outcome.Missing.Message == outcome.MissingMessage);
             because.ItsTrue("with the setup hint and try again", outcome.Missing.HasHint && outcome.Missing.TryAgain);
             because.ItsTrue("the sign-in buttons are off", !outcome.Missing.SignIn && !outcome.Missing.Continue);
+            because.ItsTrue("the setup screen offers no back: it replaces a form that can't be used", !outcome.MissingBack);
+            because.ItsTrue("a back attempt leaves the reason and the re-check up", outcome.AfterBack == outcome.Missing);
             because.ItsTrue("a blocked button runs no ceremony", outcome.CeremoniesWhileBlocked == 0);
             because.ItsTrue("try again probes again and returns to the form", outcome.SetUp.State == PasskeyViewState.Ready && outcome.SetUp.Title.Length == 0);
             because.ItsTrue("the sign-in buttons come back on", outcome.SetUp.SignIn && outcome.SetUp.Continue);
@@ -231,6 +243,35 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
             because.ItsTrue("an unsupported device shows the unavailable screen: " + outcome.OldTitle, outcome.OldTitle == outcome.UnavailableTitle);
             because.ItsTrue("without try again", !outcome.OldTryAgain);
             because.ItsTrue("an unsupported device keeps the button off", !outcome.OldSignIn);
+            because.ItsTrue("and offers no back to a dead form", !outcome.OldBack);
+            because.ItsTrue("so the reason stays on screen: " + outcome.OldMessage, outcome.OldState == PasskeyViewState.Failed && outcome.OldMessage == outcome.UnsupportedMessage);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    [UnitTest]
+    public void LeaveTheErrorOnceARetriedLinkWorks()
+    {
+        After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
+        .When<ScriptedPasskeyClient>("taps create account while the app can't route it, then tries again once it can", (client, reg) =>
+        {
+            FakePasskeyNavigator navigator = new FakePasskeyNavigator { RegistrationFailure = new InvalidOperationException("route not found") };
+            PasskeySignInViewModel screen = new PasskeySignInViewModel(client, PasskeyClientFixture.ValidConfiguration(), navigator);
+            Wait(screen.LoadAsync());
+            Wait(screen.GoToRegistrationCommand.ExecuteAsync());
+            PasskeyViewState afterFailure = screen.State;
+            navigator.RegistrationFailure = null;
+            Wait(screen.TryAgainCommand.ExecuteAsync());
+            return new RetriedLinkOutcome(afterFailure, screen.State, screen.ErrorTitle, screen.TryAgainCommand.CanExecute(null), navigator.Calls.Count(c => c == "registration"));
+        })
+        .TheTest
+        .ShouldPass<RetriedLinkOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("the failed link shows a failure", outcome.AfterFailure == PasskeyViewState.Failed);
+            because.ItsTrue("a retry that works clears it: " + outcome.Final, outcome.Final == PasskeyViewState.Ready && outcome.Title.Length == 0);
+            because.ItsTrue("and takes its try again with it", !outcome.TryAgain);
+            because.ItsTrue("the app is asked twice: " + outcome.Requests, outcome.Requests == 2);
         })
         .SoBeHappy()
         .UnlessItFailed();
@@ -381,7 +422,7 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
 
     private sealed record FailedState(PasskeyViewState State, string Title, string Message, bool HasHint, bool TryAgain, bool CreateAccount, bool AnotherWay, bool SignInInstead, bool ShowsForm);
 
-    private sealed record RecoveryOutcome(FailedState Failed, string NavigatorCalls, string ClientCalls, PasskeyViewState AfterRetry, string ExpectedTitle,
+    private sealed record RecoveryOutcome(FailedState Failed, PasskeyViewState AfterLink, bool TryAgainAfterLinks, string NavigatorCalls, string ClientCalls, PasskeyViewState AfterRetry, string ExpectedTitle,
         PasskeyViewState DismissedState, string DismissedTitle, bool AnotherWayOnForm, string AlternativeLabel);
 
     private sealed record TypedFailure(PasskeyViewState State, bool TryAgain, bool Back, bool CreateAccount, bool BackRuns);
@@ -393,8 +434,11 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
     private sealed record NavigationOutcome(string? Escaped, NavigationFailure Broken, PasskeyViewState AfterRetry, int Ceremonies, string NavigatorCalls, PasskeyViewState AfterBrokenLink,
         PasskeyViewState AfterBack, PasskeyViewState AfterLoad, bool SignInAfterLoad, string Logged, string UnknownMessage);
 
+    private sealed record RetriedLinkOutcome(PasskeyViewState AfterFailure, PasskeyViewState Final, string Title, bool TryAgain, int Requests);
+
     private sealed record UnsupportedState(PasskeyViewState State, string Title, string Message, bool HasHint, bool TryAgain, bool SignIn, bool Continue);
 
-    private sealed record UnsupportedOutcome(UnsupportedState Missing, UnsupportedState SetUp, int CeremoniesWhileBlocked, int Probes, string OldTitle, bool OldTryAgain,
+    private sealed record UnsupportedOutcome(UnsupportedState Missing, bool MissingBack, UnsupportedState AfterBack, UnsupportedState SetUp, bool OldBack,
+        PasskeyViewState OldState, string OldMessage, string UnsupportedMessage, int CeremoniesWhileBlocked, int Probes, string OldTitle, bool OldTryAgain,
         bool OldSignIn, string SetupTitle, string UnavailableTitle, string MissingMessage);
 }

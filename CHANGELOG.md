@@ -23,6 +23,11 @@ Review round 1 (bam.maui#16)
 - `IPasskeyClient` says that `PasskeyError.Message` is shown to the user as it is, so another implementation must take it from configured text.
 - 6 more unit tests (71 in all).
 
+Review round 2 (bam.maui#16)
+- The device check's failure screen no longer offers Back (`PasskeyRecovery.For(..., replacesForm: true)`). Back went to a form whose passkey buttons were off with nothing saying why, and the device-setup re-check was lost. The screen now keeps the reason up, and its Try again still checks again.
+- A navigation that works from an error screen that offers Back clears the error, and `Dismiss` drops the error's Try again. A retried "Create account" that worked used to leave the screen on "something went wrong".
+- 1 more unit test, and the probe, recovery and links tests follow Back and the links through (72 in all).
+
 Fixed (nit from the bam.maui#9 review)
 - A transport failure while the caller's own token is cancelled is reported as a cancellation, not `NetworkFailure`. Some handlers fail the body read with an `IOException` instead of an `OperationCanceledException` when the request is aborted.
 
