@@ -36,12 +36,15 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
     private readonly bool _ownsHttpClient;
     private readonly Uri _accountEndpoint;
     private readonly int _maxResponseBytes;
+    private readonly TimeSpan _timeout;
 
     /// <summary>
     /// Creates a backend over an <see cref="HttpClient"/> the host built.  The client must keep the
-    /// session cookie between requests (a <see cref="CookieContainer"/>) and should not follow
-    /// redirects; <see cref="Create(PasskeyConfiguration, PasskeyHttpBackendOptions?)"/> builds one that does both.
-    /// The client is not disposed with the backend.
+    /// session cookie between requests (a <see cref="CookieContainer"/>) and must be built with
+    /// <c>AllowAutoRedirect = false</c>: this backend refuses a redirect response, but a client that follows
+    /// redirects never shows it one.  <see cref="Create(PasskeyConfiguration, PasskeyHttpBackendOptions?)"/> builds a
+    /// client that does both.  <see cref="PasskeyHttpBackendOptions.Timeout"/> bounds each whole exchange, body
+    /// included, whatever the client's own timeout.  The client is not disposed with the backend.
     /// </summary>
     /// <param name="httpClient">The client to send with.</param>
     /// <param name="configuration">The app's passkey configuration; validated here.</param>
@@ -60,6 +63,7 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         PasskeyHttpBackendOptions resolved = options ?? new PasskeyHttpBackendOptions();
         _accountEndpoint = resolved.Resolve(configuration.RelyingPartyId);
         _maxResponseBytes = resolved.MaxResponseBytes;
+        _timeout = resolved.Timeout;
         _httpClient = httpClient;
         _ownsHttpClient = ownsHttpClient;
     }
@@ -77,12 +81,18 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
     /// <exception cref="ArgumentException">The configuration or an option is invalid.</exception>
     public static HttpPasskeyBackend Create(PasskeyConfiguration configuration, PasskeyHttpBackendOptions? options = null)
     {
-        HttpClientHandler platform = new HttpClientHandler
+        return Create(configuration, options, CreatePlatformHandler());
+    }
+
+    /// <summary>The platform handler <see cref="Create(PasskeyConfiguration, PasskeyHttpBackendOptions?)"/> sends through: cookies off (the jar keeps the session) and redirects off.</summary>
+    /// <returns>The handler.</returns>
+    internal static HttpClientHandler CreatePlatformHandler()
+    {
+        return new HttpClientHandler
         {
             UseCookies = false,
             AllowAutoRedirect = false
         };
-        return Create(configuration, options, platform);
     }
 
     /// <summary>Creates a backend whose cookie jar sits in front of <paramref name="transport"/>; the seam tests use.</summary>
@@ -185,7 +195,7 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
     public async Task<IReadOnlyList<PasskeyCredential>> GetPasskeysAsync(CancellationToken cancellationToken = default)
     {
         JsonElement root = await SendAsync(HttpMethod.Get, Routes.Passkeys, Routes.Passkeys, null, cancellationToken).ConfigureAwait(false);
-        if (!root.TryGetProperty("passkeys", out JsonElement passkeys) || passkeys.ValueKind != JsonValueKind.Array)
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("passkeys", out JsonElement passkeys) || passkeys.ValueKind != JsonValueKind.Array)
         {
             throw Invalid(Routes.Passkeys, "has no passkeys array");
         }
@@ -330,8 +340,27 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
             request.Content = content;
         }
 
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        byte[] payload = await ReadCappedAsync(response, route, cancellationToken).ConfigureAwait(false);
+        // The timeout covers the whole exchange: a server that sends headers and then stalls the body is cut off too.
+        using CancellationTokenSource exchange = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        exchange.CancelAfter(_timeout);
+        HttpResponseMessage? received = null;
+        byte[] payload;
+        try
+        {
+            received = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, exchange.Token).ConfigureAwait(false);
+            payload = await ReadCappedAsync(received, route, exchange.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            received?.Dispose();
+            throw new PasskeyException(PasskeyErrorCategory.NetworkFailure, $"The account endpoint {route} did not answer within {_timeout.TotalSeconds:0.#} s.");
+        }
+        catch
+        {
+            received?.Dispose();
+            throw;
+        }
+        using HttpResponseMessage response = received;
         if (!response.IsSuccessStatusCode)
         {
             string? backendCode = BackendCodeOf(payload);
@@ -458,7 +487,7 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
 
     private static string? OptionalString(JsonElement root, string name, string route)
     {
-        if (!root.TryGetProperty(name, out JsonElement value) || value.ValueKind == JsonValueKind.Null)
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty(name, out JsonElement value) || value.ValueKind == JsonValueKind.Null)
         {
             return null;
         }
@@ -471,7 +500,7 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
 
     private static DateTime? OptionalDate(JsonElement root, string name, string route)
     {
-        if (!root.TryGetProperty(name, out JsonElement value) || value.ValueKind == JsonValueKind.Null)
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty(name, out JsonElement value) || value.ValueKind == JsonValueKind.Null)
         {
             return null;
         }

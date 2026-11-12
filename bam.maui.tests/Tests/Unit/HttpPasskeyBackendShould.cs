@@ -290,6 +290,7 @@ public class HttpPasskeyBackendShould : UnitTestMenuContainer
                 new MalformedCase("no handle", new FakeResponse { Body = "{\"displayName\":\"Ada\"}" }, Call.AssertionComplete),
                 new MalformedCase("numeric display name", new FakeResponse { Body = "{\"handle\":\"ada\",\"displayName\":7}" }, Call.AssertionComplete),
                 new MalformedCase("no passkeys array", new FakeResponse { Body = "{\"passkeys\":{}}" }, Call.Passkeys),
+                new MalformedCase("no content for passkeys", new FakeResponse { Status = HttpStatusCode.NoContent }, Call.Passkeys),
                 new MalformedCase("passkey without id", new FakeResponse { Body = "{\"passkeys\":[{\"name\":\"x\"}]}" }, Call.Passkeys),
                 new MalformedCase("passkey bad date", new FakeResponse { Body = "{\"passkeys\":[{\"id\":\"AQID\",\"createdUtc\":\"" + Secret + "\"}]}" }, Call.Passkeys),
                 new MalformedCase("no credential id", new FakeResponse { Body = "{}" }, Call.AdditionalComplete),
@@ -422,6 +423,56 @@ public class HttpPasskeyBackendShould : UnitTestMenuContainer
         .UnlessItFailed();
     }
 
+    [UnitTest]
+    public void CutOffAStalledBody()
+    {
+        After.Setup(reg => reg.Set(new FakeAccountEndpoints()))
+        .When<FakeAccountEndpoints>("gets headers and then no body, through its own client and a host's client, and once with the caller cancelling", (unused, reg) =>
+        {
+            PasskeyHttpBackendOptions quick = new PasskeyHttpBackendOptions { Timeout = TimeSpan.FromMilliseconds(300) };
+            System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+
+            FakeAccountEndpoints own = new FakeAccountEndpoints().Respond(new FakeResponse { StallBody = true });
+            using HttpPasskeyBackend created = Backend(own, quick);
+            PasskeyException? ownClient = Caught(() => created.GetPasskeysAsync());
+
+            // A host's client with no timeout of its own: the backend's timeout still applies.
+            FakeAccountEndpoints hosted = new FakeAccountEndpoints().Respond(new FakeResponse { StallBody = true });
+            using HttpClient hostClient = new HttpClient(hosted) { Timeout = Timeout.InfiniteTimeSpan };
+            using HttpPasskeyBackend host = new HttpPasskeyBackend(hostClient, PasskeyClientFixture.ValidConfiguration(), quick);
+            PasskeyException? hostClientCaught = Caught(() => host.GetPasskeysAsync());
+            long elapsed = watch.ElapsedMilliseconds;
+
+            FakeAccountEndpoints cancelled = new FakeAccountEndpoints().Respond(new FakeResponse { StallBody = true });
+            using HttpPasskeyBackend patient = Backend(cancelled, new PasskeyHttpBackendOptions { Timeout = TimeSpan.FromMinutes(5) });
+            using CancellationTokenSource caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+            string callerCancel = "nothing";
+            try
+            {
+                patient.GetPasskeysAsync(caller.Token).GetAwaiter().GetResult();
+            }
+            catch (Exception exception)
+            {
+                callerCancel = exception is OperationCanceledException ? "cancelled" : exception.GetType().Name;
+            }
+
+            HttpClientHandler platform = HttpPasskeyBackend.CreatePlatformHandler();
+            return new StallOutcome(ownClient?.Category, hostClientCaught?.Category, elapsed, callerCancel, platform.AllowAutoRedirect, platform.UseCookies);
+        })
+        .TheTest
+        .ShouldPass<StallOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("a stalled body through the backend's own client is a network failure, got " + outcome.OwnClient, outcome.OwnClient == PasskeyErrorCategory.NetworkFailure);
+            because.ItsTrue("through a host's client with no timeout too, got " + outcome.HostClient, outcome.HostClient == PasskeyErrorCategory.NetworkFailure);
+            because.ItsTrue("both are cut off by the 300 ms timeout, took " + outcome.ElapsedMilliseconds + " ms", outcome.ElapsedMilliseconds < 10000);
+            because.ItsTrue("a caller's cancel stays a cancellation, got " + outcome.CallerCancel, outcome.CallerCancel == "cancelled");
+            because.ItsTrue("the platform handler does not follow redirects", !outcome.FollowsRedirects);
+            because.ItsTrue("leaves cookies to the jar", !outcome.UsesCookies);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
     private static HttpPasskeyBackend Backend(FakeAccountEndpoints fake, PasskeyHttpBackendOptions? options = null)
     {
         return HttpPasskeyBackend.Create(PasskeyClientFixture.ValidConfiguration(), options, fake);
@@ -455,6 +506,11 @@ public class HttpPasskeyBackendShould : UnitTestMenuContainer
         catch (PasskeyException exception)
         {
             return exception;
+        }
+        catch (Exception exception)
+        {
+            // Anything but a PasskeyException is a defect: report it as Unknown so the test names it instead of crashing.
+            return new PasskeyException(PasskeyErrorCategory.Unknown, exception.GetType().Name);
         }
     }
 
@@ -497,4 +553,6 @@ public class HttpPasskeyBackendShould : UnitTestMenuContainer
     private sealed record EndpointOutcome(string Default, string Resolved, string NotRefused);
 
     private sealed record CodeOutcome(PasskeyErrorCategory? Category, string? Code, bool AppMessage, string NewMessages, bool Bound, bool KeptExisting);
+
+    private sealed record StallOutcome(PasskeyErrorCategory? OwnClient, PasskeyErrorCategory? HostClient, long ElapsedMilliseconds, string CallerCancel, bool FollowsRedirects, bool UsesCookies);
 }

@@ -127,7 +127,7 @@ else if (!result.WasCancelled)
 
 - `PasskeyHttpBackendOptions.AccountEndpoint` defaults to `https://<relying party id>/account/`. It must be https, with no user info, query or fragment, and on the relying party id or a subdomain of it. `Timeout` (30 s) and `MaxResponseBytes` (256 KB) can be changed.
 - Every request carries `X-Bam-Account: bam.maui` and no `Origin`, which is how the endpoints recognize a native client.
-- The session is the `.Bam.Account` cookie. `HttpPasskeyBackend.Create` keeps it in a cookie jar of its own, in front of the platform's HTTP handler (which runs with cookies and redirects off), so the session works the same on every platform. Passing your own `HttpClient` is also supported; it then has to keep cookies itself.
+- The session is the `.Bam.Account` cookie. `HttpPasskeyBackend.Create` keeps it in a cookie jar of its own, in front of the platform's HTTP handler (which runs with cookies and redirects off), so the session works the same on every platform. Passing your own `HttpClient` is also supported. It then has to keep cookies itself, and it must be built with `AllowAutoRedirect = false`: the backend refuses a redirect it sees, but a client that follows redirects never shows it one.
 - WebAuthn options go to the authenticator byte for byte, and the authenticator's response is sent as `credential` unchanged.
 - `nextUrl` is kept only when it is a path on the site. A credential id goes into a path only when it is base64url.
 
@@ -243,7 +243,8 @@ Known unknown these steps settle: whether the Apple sheet needs anything beyond 
 - Nothing sensitive is logged. Failures are logged by operation, category and exception type names. Exception messages and WebAuthn payloads are not. The payload wrappers, the registration request (email, invite code) and the authentication challenge (ceremony id) print only their type name. Tests pin all of this.
 - `PasskeyFeatures` switches decide what the app offers. They are not access control; the backend enforces what an account may do.
 - `PasskeySignIn.NextUrl` is whatever the backend sent. `HttpPasskeyBackend` keeps it only when it is a path on the site; a custom backend should do the same, and the app should still treat it as a path, never a URL.
-- `HttpPasskeyBackend` only talks to the relying party or a subdomain of it, over https, without following redirects. Refusals are reported by code and status, never by quoting a body.
+- `HttpPasskeyBackend` only talks to the relying party or a subdomain of it, over https. The client `Create` builds doesn't follow redirects; a host's own `HttpClient` must be built the same way. Refusals are reported by code and status, never by quoting a body.
+- `PasskeyHttpBackendOptions.Timeout` bounds each whole exchange, body included, on either kind of client, so a server that sends headers and then stalls is cut off and reported as `NetworkFailure`.
 - Every platform authenticator refuses options whose `rp.id` (or `rpId`) is missing or is not the configured `RelyingPartyId`, before the platform is called. Options for another relying party never reach a prompt. Options with a duplicate member are refused too, because Android hands the raw JSON to Credential Manager and a provider's reader may keep a different copy of `rpId` than the check saw.
 - Refusals never quote the options. A malformed challenge or a foreign RP id is named by member, not by value.
 - Native apps need the relying-party domain to vouch for them: Digital Asset Links for Android, Associated Domains for Apple. See [Platform setup](#platform-setup).

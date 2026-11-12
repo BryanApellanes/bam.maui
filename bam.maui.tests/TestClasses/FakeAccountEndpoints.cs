@@ -17,6 +17,9 @@ public sealed class FakeResponse
     public string? Location { get; init; }
     public bool OmitLength { get; init; }
     public Exception? Throw { get; init; }
+
+    /// <summary>Send the headers, then never send the body.</summary>
+    public bool StallBody { get; init; }
 }
 
 /// <summary>
@@ -56,7 +59,13 @@ public sealed class FakeAccountEndpoints : HttpMessageHandler
             throw next.Throw;
         }
         HttpResponseMessage response = new HttpResponseMessage(next.Status);
-        if (next.Body is not null)
+        if (next.StallBody)
+        {
+            StreamContent stalled = new StreamContent(new StallingStream());
+            stalled.Headers.TryAddWithoutValidation("Content-Type", next.ContentType);
+            response.Content = stalled;
+        }
+        else if (next.Body is not null)
         {
             byte[] bytes = Encoding.UTF8.GetBytes(next.Body);
             HttpContent content = next.OmitLength ? new StreamContent(new UnknownLengthStream(bytes)) : new ByteArrayContent(bytes);
@@ -72,6 +81,32 @@ public sealed class FakeAccountEndpoints : HttpMessageHandler
             response.Headers.Location = new Uri(next.Location);
         }
         return response;
+    }
+
+    /// <summary>A body that never arrives: every read waits until it is cancelled.</summary>
+    private sealed class StallingStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException("Read asynchronously.");
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            return 0;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        }
     }
 
     /// <summary>A stream that will not say how long it is, so the content has no Content-Length.</summary>
