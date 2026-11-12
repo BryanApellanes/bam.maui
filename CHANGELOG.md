@@ -28,6 +28,13 @@ Review round 2 (bam.maui#16)
 - A navigation that works from an error screen that offers Back clears the error, and `Dismiss` drops the error's Try again. A retried "Create account" that worked used to leave the screen on "something went wrong".
 - 1 more unit test, and the probe, recovery and links tests follow Back and the links through (72 in all).
 
+Review round 3 (bam.maui#16)
+- The device check's failure is the sign-in screen's state, not a one-off flag. While it stands, `Dismiss` (Back, and the clear after a working link) returns to the device-check screen with its reason and its re-check. Back from a link the app couldn't follow used to land on the dead form. `RestoreForm` ends it when a check succeeds.
+- A link that finishes after a newer error appeared no longer clears that error.
+- The README recommends `AlternativeSignInLabel` for devices that can't do passkeys.
+- The blank sign-in screen while `SignedInAsync` runs is bam.maui#17, for Phase 5.
+- 1 more unit test (73 in all).
+
 Fixed (nit from the bam.maui#9 review)
 - A transport failure while the caller's own token is cancelled is reported as a cancellation, not `NetworkFailure`. Some handlers fail the body read with an `IOException` instead of an `OperationCanceledException` when the request is aborted.
 

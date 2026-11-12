@@ -251,6 +251,53 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
     }
 
     [UnitTest]
+    public void ComeBackToTheDeviceCheckFromALaterError()
+    {
+        After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
+        .When<ScriptedPasskeyClient>("needs setup, follows a link the app can't route, goes back, retries the link, then sets up", (client, reg) =>
+        {
+            FakePasskeyNavigator navigator = new FakePasskeyNavigator { AlternativeFailure = new InvalidOperationException("route not found") };
+            PasskeyConfiguration configuration = PasskeyClientFixture.ValidConfiguration();
+            configuration.Experience.AlternativeSignInLabel = "Email me a link";
+            PasskeySignInViewModel screen = new PasskeySignInViewModel(client, configuration, navigator);
+            client.Capabilities = new PasskeyCapabilities { Availability = PasskeyAvailability.MissingCredentialProvider, Platform = "Test" };
+            Wait(screen.LoadAsync());
+
+            Wait(screen.UseAnotherWayCommand.ExecuteAsync());
+            bool linkFailureOffersBack = screen.OffersBack && screen.BackCommand.CanExecute(null);
+            Wait(screen.BackCommand.ExecuteAsync());
+            CheckScreen afterBack = Check(screen);
+
+            Wait(screen.UseAnotherWayCommand.ExecuteAsync());
+            navigator.AlternativeFailure = null;
+            Wait(screen.TryAgainCommand.ExecuteAsync());
+            CheckScreen afterRetriedLink = Check(screen);
+
+            client.Capabilities = new PasskeyCapabilities { Availability = PasskeyAvailability.Available, Platform = "Test" };
+            Wait(screen.TryAgainCommand.ExecuteAsync());
+            return new LaterErrorOutcome(linkFailureOffersBack, afterBack, afterRetriedLink, screen.State, screen.SignInCommand.CanExecute(null),
+                configuration.Text.DeviceSetupTitle, configuration.Messages.MissingCredentialProvider, navigator.Calls.Count(c => c == "alternative"));
+        })
+        .TheTest
+        .ShouldPass<LaterErrorOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("the link's failure has its own back", outcome.LinkFailureOffersBack);
+            because.ItsTrue("back returns to the device check, not the form: " + outcome.AfterBack, outcome.AfterBack.IsSetupScreen(outcome.SetupTitle, outcome.SetupMessage));
+            because.ItsTrue("so does a retried link that works: " + outcome.AfterRetriedLink, outcome.AfterRetriedLink.IsSetupScreen(outcome.SetupTitle, outcome.SetupMessage));
+            because.ItsTrue("the app is asked three times: " + outcome.Requests, outcome.Requests == 3);
+            because.ItsTrue("its try again still checks the device, and a set-up device gets the form", outcome.Final == PasskeyViewState.Ready && outcome.SignInAfterSetup);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    private static CheckScreen Check(PasskeySignInViewModel screen)
+    {
+        return new CheckScreen(screen.State, screen.ErrorTitle, screen.ErrorMessage, screen.TryAgainCommand.CanExecute(null), screen.OffersBack,
+            screen.SignInCommand.CanExecute(null));
+    }
+
+    [UnitTest]
     public void LeaveTheErrorOnceARetriedLinkWorks()
     {
         After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
@@ -433,6 +480,17 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
 
     private sealed record NavigationOutcome(string? Escaped, NavigationFailure Broken, PasskeyViewState AfterRetry, int Ceremonies, string NavigatorCalls, PasskeyViewState AfterBrokenLink,
         PasskeyViewState AfterBack, PasskeyViewState AfterLoad, bool SignInAfterLoad, string Logged, string UnknownMessage);
+
+    private sealed record CheckScreen(PasskeyViewState State, string Title, string Message, bool TryAgain, bool Back, bool SignIn)
+    {
+        public bool IsSetupScreen(string title, string message)
+        {
+            return State == PasskeyViewState.Failed && Title == title && Message == message && TryAgain && !Back && !SignIn;
+        }
+    }
+
+    private sealed record LaterErrorOutcome(bool LinkFailureOffersBack, CheckScreen AfterBack, CheckScreen AfterRetriedLink, PasskeyViewState Final,
+        bool SignInAfterSetup, string SetupTitle, string SetupMessage, int Requests);
 
     private sealed record RetriedLinkOutcome(PasskeyViewState AfterFailure, PasskeyViewState Final, string Title, bool TryAgain, int Requests);
 

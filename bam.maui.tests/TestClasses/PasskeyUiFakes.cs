@@ -16,6 +16,9 @@ public sealed class FakePasskeyNavigator : IPasskeyNavigator
     /// <summary>Thrown by RegistrationRequestedAsync while set.</summary>
     public Exception? RegistrationFailure { get; set; }
 
+    /// <summary>Thrown by AlternativeSignInRequestedAsync while set.</summary>
+    public Exception? AlternativeFailure { get; set; }
+
     /// <summary>Runs inside SignedInAsync, while the screen is still on its success state.</summary>
     public Action? WhileSignedIn { get; set; }
 
@@ -35,6 +38,10 @@ public sealed class FakePasskeyNavigator : IPasskeyNavigator
     public Task AlternativeSignInRequestedAsync()
     {
         Calls.Add("alternative");
+        if (AlternativeFailure is not null)
+        {
+            throw AlternativeFailure;
+        }
         return Task.CompletedTask;
     }
 

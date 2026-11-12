@@ -32,6 +32,8 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     private string? _note;
     private CancellationTokenSource? _ceremony;
     private Func<Task>? _lastAttempt;
+    private PasskeyError? _formReplacedBy;
+    private Func<Task>? _formReplacedRetry;
     private bool _typedInput;
     private readonly ILogger? _logger;
 
@@ -204,16 +206,39 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     /// <summary>
     /// Clears an error and returns to where the user was before it: the form, with what they typed kept, or (see
     /// <see cref="DismissedState"/>) a success screen whose navigation failed.  The error's "try again" goes with it.
+    /// While a failure has replaced the form (see <see cref="Fail(PasskeyError, Func{Task}?, bool)"/>), that failure's
+    /// screen is where the user was: it comes back, with its reason and its "try again", until
+    /// <see cref="RestoreForm"/>.
     /// </summary>
     public void Dismiss()
     {
-        if (State == PasskeyViewState.Failed)
+        if (State != PasskeyViewState.Failed)
+        {
+            return;
+        }
+        if (_formReplacedBy is not null)
+        {
+            _typedInput = false;
+            _lastAttempt = _formReplacedRetry;
+            Fail(_formReplacedBy, true);
+        }
+        else
         {
             Recovery = null;
             _lastAttempt = null;
             State = DismissedState;
             RaiseCommands();
         }
+    }
+
+    /// <summary>
+    /// Ends a failure that replaced the form (the device can do passkeys after all) and returns to the form.
+    /// </summary>
+    protected void RestoreForm()
+    {
+        _formReplacedBy = null;
+        _formReplacedRetry = null;
+        Dismiss();
     }
 
     /// <summary>Where <see cref="Dismiss"/> returns to.  The form, unless a derived screen has somewhere better.</summary>
@@ -295,17 +320,18 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     /// <see cref="PasskeyErrorCategory.Unknown"/> failure whose "try again" makes the same call again.  The app's code
     /// never throws through a command, where an <c>async void</c> handler would crash the app.  A call that succeeds
     /// from an error screen that offers Back (a retried link, the app's other way in) clears the error, so the screen
-    /// isn't left on it when the app returns.
+    /// isn't left on it when the app returns.  It doesn't clear a newer error shown while the call ran.
     /// </summary>
     /// <param name="navigate">The navigation call.</param>
     /// <returns>A task that completes when the call has returned or failed.</returns>
     protected async Task NavigateAsync(Func<Task> navigate)
     {
         ArgumentNullException.ThrowIfNull(navigate);
+        PasskeyRecoveryPlan? showing = Recovery;
         try
         {
             await navigate();
-            if (State == PasskeyViewState.Failed && OffersBack)
+            if (State == PasskeyViewState.Failed && OffersBack && ReferenceEquals(Recovery, showing))
             {
                 Dismiss();
             }
@@ -323,11 +349,17 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     /// <param name="retry">What <see cref="TryAgainCommand"/> runs, or null to keep the last attempt.</param>
     /// <param name="replacesForm">
     /// Whether the failure screen takes the place of a form that can't be used, so it offers no Back (see
-    /// <see cref="PasskeyRecovery.For"/>).
+    /// <see cref="PasskeyRecovery.For"/>), and <see cref="Dismiss"/> returns to it, not the form, until
+    /// <see cref="RestoreForm"/>.
     /// </param>
     protected void Fail(PasskeyError error, Func<Task>? retry, bool replacesForm = false)
     {
         _typedInput = false;
+        if (replacesForm)
+        {
+            _formReplacedBy = error;
+            _formReplacedRetry = retry;
+        }
         if (retry is not null)
         {
             _lastAttempt = retry;

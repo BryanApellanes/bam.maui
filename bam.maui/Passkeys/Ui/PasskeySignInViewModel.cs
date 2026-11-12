@@ -73,7 +73,8 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
     /// <summary>
     /// Checks the device can do passkeys, without prompting.  Call it when the screen appears.  A device that can't
     /// shows the unavailable or device-setup screen in place of the form, with no Back (the buttons couldn't work); the
-    /// device-setup screen's "try again" checks again.  A screen shown again after a
+    /// device-setup screen's "try again" checks again.  Back from any later error (a link the app couldn't follow) returns
+    /// to that screen, not the form, until a check succeeds.  A screen shown again after a
     /// sign-in (a cached page the app returns to after sign-out) is back on the form.
     /// </summary>
     /// <param name="cancellationToken">Cancels the probe.</param>
@@ -89,7 +90,7 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
         if (capabilities.IsSupported)
         {
             // A device that was set up while the screen showed the setup error: back to the form.
-            Dismiss();
+            RestoreForm();
         }
         else
         {
