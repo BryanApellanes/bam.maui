@@ -12,19 +12,19 @@ Apps use it to register an account with a passkey, sign in (with or without a us
 
 ### Status
 
-Phases 1 and 2 of 7 are in place. Tracking issue: BryanApellanes/bam.maui#1.
+Phases 1 to 3 of 7 are in place. Tracking issue: BryanApellanes/bam.maui#1.
 
 | Phase | What | State |
 |---|---|---|
 | 1 | Contracts, configuration, orchestration, DI, unit tests | Done |
 | 2 | Native authenticators (Android, iOS, Mac Catalyst, Windows) | Done. Compiled and unit tested; no ceremony has been run on a device yet (see [Manual verification](#manual-verification)) |
-| 3 | HTTP backend for bam.useraccounts.web | Not started |
+| 3 | HTTP backend for bam.useraccounts.web | Done. Tested against fake endpoints; not yet run against a live host |
 | 4 | White-label views and theming | Not started |
 | 5 | Passkey management UI | Not started |
 | 6 | Older Android, platform matrix | Not started |
 | 7 | Hardening, docs, sample app | Not started |
 
-The library never reports support it can't deliver: `IsSupportedAsync` is true only when the platform's authenticator says a ceremony can run. There is no backend yet (Phase 3), so an app binds its own `IPasskeyBackend` for now.
+The library never reports support it can't deliver: `IsSupportedAsync` is true only when the platform's authenticator says a ceremony can run. `HttpPasskeyBackend` talks to a bam host's account endpoints; an app with another server binds its own `IPasskeyBackend`.
 
 ### Platform support
 
@@ -73,7 +73,6 @@ Inside `bamtk.sln` the library builds `net10.0` only. `run-tests.sh` builds that
 
 ```csharp
 ServiceRegistry registry = new ServiceRegistry();
-registry.For<IPasskeyBackend>().Use(new MyBackend());              // your relying-party client
 // The platform's authenticator is bound for you. Bind your own IPasskeyAuthenticator here to replace it.
 
 PasskeyConfiguration configuration = new PasskeyConfiguration
@@ -89,8 +88,11 @@ PasskeyConfiguration configuration = new PasskeyConfiguration
     Features = new PasskeyFeatures { EnableManagement = true }
 };
 
+registry.AddHttpPasskeyBackend(configuration);                   // the bam account endpoints at https://example.com/account/
 builder.Services.AddBamPasskeys(registry, configuration);          // in MauiProgram
 ```
+
+A server that isn't a bam host gets its own `IPasskeyBackend`, bound before `IPasskeyClient` is resolved (`registry.For<IPasskeyBackend>().Use(new MyBackend())`).
 
 Then inject `IPasskeyClient`:
 
@@ -108,6 +110,42 @@ else if (!result.WasCancelled)
 
 `AddPasskeyClient(this ServiceRegistry, PasskeyConfiguration)` does the same without MAUI's service collection.
 
+### HTTP backend
+
+`HttpPasskeyBackend` is the client for the account endpoints of `bam.useraccounts.web` (its README, "Endpoints"). The HTTP contract is the boundary, and bam.maui doesn't reference bam.useraccounts.
+
+| `IPasskeyBackend` member | Request |
+|---|---|
+| `BeginRegistrationAsync` | `POST passkey/registration/begin` `{ handle, displayName, email?, inviteCode? }` |
+| `CompleteRegistrationAsync` | `POST passkey/registration/complete`, the same fields plus `credential` |
+| `BeginAdditionalRegistrationAsync` | `POST passkey/additional/begin` `{}` |
+| `CompleteAdditionalRegistrationAsync` | `POST passkey/additional/complete` `{ credential }` |
+| `BeginAuthenticationAsync` | `POST passkey/assertion/begin` `{ handle? }` |
+| `CompleteAuthenticationAsync` | `POST passkey/assertion/complete` `{ ceremonyId, credential }` |
+| `GetPasskeysAsync` | `GET passkeys` |
+| `DeletePasskeyAsync` | `DELETE passkeys/{id}` |
+
+- `PasskeyHttpBackendOptions.AccountEndpoint` defaults to `https://<relying party id>/account/`. It must be https, with no user info, query or fragment, and on the relying party id or a subdomain of it. `Timeout` (30 s) and `MaxResponseBytes` (256 KB) can be changed.
+- Every request carries `X-Bam-Account: bam.maui` and no `Origin`, which is how the endpoints recognize a native client.
+- The session is the `.Bam.Account` cookie. `HttpPasskeyBackend.Create` keeps it in a cookie jar of its own, in front of the platform's HTTP handler (which runs with cookies and redirects off), so the session works the same on every platform. Passing your own `HttpClient` is also supported. It then has to keep cookies itself, and it must be built with `AllowAutoRedirect = false`: the backend refuses a redirect it sees, but a client that follows redirects never shows it one.
+- WebAuthn options go to the authenticator byte for byte, and the authenticator's response is sent as `credential` unchanged.
+- `nextUrl` is kept only when it is a path on the site. A credential id goes into a path only when it is base64url.
+
+How a refusal maps. The endpoint's `error` code wins over the HTTP status, and it is carried as `PasskeyError.BackendCode`:
+
+| Response | Category |
+|---|---|
+| `NotSignedIn`, or 401 | `NotSignedIn` |
+| `RateLimited`, or 429 | `RateLimited` |
+| `BadRequest`, `InvalidHandle`, `HandleTaken`, `EmailRequired`, `InviteRequired`, `NotFound`, `LastPasskey`, or a bare 400 | `InvalidOptions` |
+| `RequestRefused`, `SignInFailed`, `SignUpFailed`, `SignUpClosed`, `PasskeyNotAdded`, or another 4xx | `ServerVerificationFailed` |
+| 502, 503, 504, or a transport failure or timeout | `NetworkFailure` |
+| A redirect, a bare 404 or 405, another 5xx, or a success that isn't the contract (not JSON, a missing member, too large) | `InvalidServerResponse` |
+
+The server's `message` isn't used. A sign-up screen branches on `BackendCode` (for example `HandleTaken` against `InviteRequired`) and shows its own text.
+
+The host must list `https://<rp id>` in `PasskeyOptions.AllowedOrigins` for the iOS, Mac Catalyst and Windows clients (the site's own origin, so usually nothing to add), and the Android app's origin in `PasskeyOptions.AllowedAppOrigins`.
+
 ### API
 
 | Member | Does |
@@ -124,7 +162,7 @@ No ceremony or management method throws for an expected failure. Each returns a 
 
 ### Errors
 
-`PasskeyErrorCategory` is the one vocabulary on every platform: `UserCancelled`, `NoCredentials`, `UnsupportedOperatingSystem`, `MissingCredentialProvider`, `DeviceSecurityNotConfigured`, `NetworkFailure`, `InvalidServerResponse`, `InvalidOptions`, `ExpiredChallenge`, `ServerVerificationFailed`, `PlatformFailure`, `FeatureDisabled`, `CredentialAlreadyRegistered`, `Unknown`.
+`PasskeyErrorCategory` is the one vocabulary on every platform: `UserCancelled`, `NoCredentials`, `UnsupportedOperatingSystem`, `MissingCredentialProvider`, `DeviceSecurityNotConfigured`, `NetworkFailure`, `InvalidServerResponse`, `InvalidOptions`, `ExpiredChallenge`, `ServerVerificationFailed`, `PlatformFailure`, `FeatureDisabled`, `CredentialAlreadyRegistered`, `NotSignedIn`, `RateLimited`, `Unknown`. `PasskeyError.BackendCode` carries the backend's own refusal code when it sent one; it is a code to branch on, not text to show.
 
 Cancellation is not a failure; check `WasCancelled` and return the user to where they were. The message on a `PasskeyError` always comes from `PasskeyMessages`, never from an exception. Replace its members to reword or localize.
 
@@ -204,7 +242,9 @@ Known unknown these steps settle: whether the Apple sheet needs anything beyond 
 - Private keys and biometric data never reach the app; the platform APIs don't expose them.
 - Nothing sensitive is logged. Failures are logged by operation, category and exception type names. Exception messages and WebAuthn payloads are not. The payload wrappers, the registration request (email, invite code) and the authentication challenge (ceremony id) print only their type name. Tests pin all of this.
 - `PasskeyFeatures` switches decide what the app offers. They are not access control; the backend enforces what an account may do.
-- `PasskeySignIn.NextUrl` is whatever the backend sent. Check it is a relative path or on the relying party's origin before navigating to it.
+- `PasskeySignIn.NextUrl` is whatever the backend sent. `HttpPasskeyBackend` keeps it only when it is a path on the site; a custom backend should do the same, and the app should still treat it as a path, never a URL.
+- `HttpPasskeyBackend` only talks to the relying party or a subdomain of it, over https. The client `Create` builds doesn't follow redirects; a host's own `HttpClient` must be built the same way. Refusals are reported by code and status, never by quoting a body.
+- `PasskeyHttpBackendOptions.Timeout` bounds each whole exchange, body included, on either kind of client, so a server that sends headers and then stalls is cut off and reported as `NetworkFailure`.
 - Every platform authenticator refuses options whose `rp.id` (or `rpId`) is missing or is not the configured `RelyingPartyId`, before the platform is called. Options for another relying party never reach a prompt. Options with a duplicate member are refused too, because Android hands the raw JSON to Credential Manager and a provider's reader may keep a different copy of `rpId` than the check saw.
 - Refusals never quote the options. A malformed challenge or a foreign RP id is named by member, not by value.
 - Native apps need the relying-party domain to vouch for them: Digital Asset Links for Android, Associated Domains for Apple. See [Platform setup](#platform-setup).
@@ -219,7 +259,7 @@ dotnet build bam.maui.tests/bam.maui.tests.csproj -c Release
 BAM_ARG_STYLE=Posix dotnet run --project bam.maui.tests/bam.maui.tests.csproj -c Release --no-build -- --ut
 ```
 
-Suites: `pkcf` configuration, branding, capabilities and what the models print; `pken` error normalization; `pkcl` client orchestration, cancellation, feature switches and management; `pkdg` where a cancellation came from, and what reaches the log; `pkrg` registration; `pkwj` reading options and writing response JSON; `pkwn` the Windows authenticator and its interop layout; `pkpe` the Android, Apple and Windows error maps; `pkpc` a callback ceremony ending from the caller's token.
+Suites: `pkcf` configuration, branding, capabilities and what the models print; `pken` error normalization; `pkcl` client orchestration, cancellation, feature switches and management; `pkdg` where a cancellation came from, and what reaches the log; `pkrg` registration; `pkwj` reading options and writing response JSON; `pkwn` the Windows authenticator and its interop layout; `pkpe` the Android, Apple and Windows error maps; `pkpc` a callback ceremony ending from the caller's token; `pkhb` the HTTP backend against fake account endpoints.
 
 ### Dependencies
 

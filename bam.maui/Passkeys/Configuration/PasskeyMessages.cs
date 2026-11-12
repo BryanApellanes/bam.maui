@@ -46,6 +46,12 @@ public sealed class PasskeyMessages
     /// <summary>Shown when the device already holds a passkey for the account.</summary>
     public string CredentialAlreadyRegistered { get; set; } = "This device already has a passkey for this account.";
 
+    /// <summary>Shown for <see cref="PasskeyErrorCategory.NotSignedIn"/>.</summary>
+    public string NotSignedIn { get; set; } = "Sign in again to continue.";
+
+    /// <summary>Shown for <see cref="PasskeyErrorCategory.RateLimited"/>.</summary>
+    public string RateLimited { get; set; } = "Too many attempts. Wait a moment and try again.";
+
     /// <summary>Shown for anything else.</summary>
     public string Unknown { get; set; } = "Something went wrong. Try again.";
 
@@ -69,6 +75,8 @@ public sealed class PasskeyMessages
             PasskeyErrorCategory.PlatformFailure => PlatformFailure,
             PasskeyErrorCategory.FeatureDisabled => FeatureDisabled,
             PasskeyErrorCategory.CredentialAlreadyRegistered => CredentialAlreadyRegistered,
+            PasskeyErrorCategory.NotSignedIn => NotSignedIn,
+            PasskeyErrorCategory.RateLimited => RateLimited,
             _ => Unknown
         };
     }
