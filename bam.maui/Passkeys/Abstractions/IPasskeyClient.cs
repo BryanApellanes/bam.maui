@@ -11,6 +11,11 @@ namespace Bam.Maui.Passkeys;
 /// faults and server refusals all come back as a failed <see cref="PasskeyResult"/> whose
 /// <see cref="PasskeyError"/> carries a category and a message that is safe to show.
 /// </para>
+/// <para>
+/// The library's screens show <see cref="PasskeyError.Message"/> to the user as it is.  An implementation other than
+/// <see cref="PasskeyClient"/> must take that message from <see cref="PasskeyMessages"/> (or other text the app wrote),
+/// never from a server response, an exception or a WebAuthn payload.
+/// </para>
 /// </summary>
 public interface IPasskeyClient
 {

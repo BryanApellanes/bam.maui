@@ -2,6 +2,56 @@
 
 ## Unreleased
 
+### Phase 4: white-label screens (bam.maui#10)
+
+Added
+- `PasskeySignInView` and `PasskeyRegistrationView`, with ready-made `PasskeySignInPage` and `PasskeyRegistrationPage`, built in C# on a shared `PasskeyScreenLayout` (brand and content, one column on narrow windows, side by side from 840 wide) and `PasskeyStatusView` (progress, cancel, and the failure screen).
+- `PasskeySignInViewModel` and `PasskeyRegistrationViewModel` over `IPasskeyClient`, sharing `PasskeyFlowViewModel` (`Ready`, `Working`, `Succeeded`, `Failed`, cancel and try again) and `PasskeyCommand`.
+- `PasskeyRecovery`, which maps a failed ceremony to a heading, the message, a hint and the ways out (`PasskeyRecoveryPlan`, `PasskeyRecoveryAction`). A cancellation is quiet: the form stays and shows a note.
+- `IPasskeyNavigator`, the app's side of leaving a flow.
+- `PasskeyTheme` and `PasskeyResourceKeys`: the brand as a `ResourceDictionary`, light and dark, following the device when `ThemeMode` is `System`, with black or white text on the primary colour by WCAG contrast.
+- `PasskeyText` (every on-screen string, validated) and `PasskeyExperience` (`SignInMode`, `AlternativeSignInLabel`, `OfferRegistration`, `AskForEmail`, `AskForInviteCode`), both on `PasskeyConfiguration`.
+- `AddPasskeyUi` and `AddBamPasskeyUi`.
+- 17 unit tests (65 at the first review): suites `pkrc`, `pksi`, `pkrv`, `pkth`, plus screen-text and screen-registration tests in `pkcf` and `pkrg`.
+
+Review round 1 (bam.maui#16)
+- Every failure screen ends with Back (`PasskeyRecoveryAction.Back`, `BackCommand`, `PasskeyText.Back`), which returns to the form with the fields kept. No failure screen is a dead end, and a test checks every category, flow and configuration for it.
+- `PasskeyRecovery.For` takes `typedInput`. A failure caused by what the user typed (`InvalidOptions`, `NoCredentials`, and a refused sign-up in registration) no longer offers Try again, which sent the same username or fields again. The user goes Back and changes them.
+- Sign-in goes back to the form once the app's `SignedInAsync` returns, and when the page appears again. A cached page shown after sign-out was blank. Registration clears its fields after Done.
+- A failure in the app's `IPasskeyNavigator` is caught, logged by exception type, and shown as an `Unknown` failure whose Try again repeats the call. It used to escape `async void` and crash the app, or leave a blank success screen. Back from a failed Done returns to the success screen, because the account exists. The screens take an optional `ILogger`, which `AddPasskeyUi` passes when the registry has one.
+- `ShowsForm` is removed (no view used it). `Dismiss` refreshes the commands.
+- `IPasskeyClient` says that `PasskeyError.Message` is shown to the user as it is, so another implementation must take it from configured text.
+- 6 more unit tests (71 in all).
+
+Review round 2 (bam.maui#16)
+- The device check's failure screen no longer offers Back (`PasskeyRecovery.For(..., replacesForm: true)`). Back went to a form whose passkey buttons were off with nothing saying why, and the device-setup re-check was lost. The screen now keeps the reason up, and its Try again still checks again.
+- A navigation that works from an error screen that offers Back clears the error, and `Dismiss` drops the error's Try again. A retried "Create account" that worked used to leave the screen on "something went wrong".
+- 1 more unit test, and the probe, recovery and links tests follow Back and the links through (72 in all).
+
+Review round 3 (bam.maui#16)
+- The device check's failure is the sign-in screen's state, not a one-off flag. While it stands, `Dismiss` (Back, and the clear after a working link) returns to the device-check screen with its reason and its re-check. Back from a link the app couldn't follow used to land on the dead form. `RestoreForm` ends it when a check succeeds.
+- A link that finishes after a newer error appeared no longer clears that error.
+- The README recommends `AlternativeSignInLabel` for devices that can't do passkeys.
+- The blank sign-in screen while `SignedInAsync` runs is bam.maui#17, for Phase 5.
+- 1 more unit test (73 in all).
+
+Review round 4 (bam.maui#16)
+- A unit test pins the "leave a newer error alone" guard: a slow link that finishes after a second link failed leaves the second error up (74 in all).
+
+Fixed (nit from the bam.maui#9 review)
+- A transport failure while the caller's own token is cancelled is reported as a cancellation, not `NetworkFailure`. Some handlers fail the body read with an `IOException` instead of an `OperationCanceledException` when the request is aborted.
+
+Decisions
+- Views are built in C#, not XAML, so the library has no XAML compilation step in any target.
+- The flow, recovery and navigation live in view models that don't touch MAUI controls, so they are tested without a device. An app can bind its own XAML to them.
+- The library assumes no navigation framework. `IPasskeyNavigator` lets Shell, `NavigationPage` and `Window.Page` apps each do their own thing.
+- Registration success is shown only after the backend's complete call returns; the success screen's Continue is what calls `SignedInAsync`.
+- The profile step (`POST /account/profile` when `profileCreated` is false, bam.useraccounts#22) is left to Phase 5 with account management. `profileCreated` isn't on the `IPasskeyBackend` seam yet.
+
+Outstanding
+- The views compile for every target but haven't been rendered on a device. The view-model tests cover what the screens do.
+- Screen-reader and dynamic-type behaviour need checking on each platform.
+
 ### Builds without the MAUI workload (bam.maui#12)
 
 Changed

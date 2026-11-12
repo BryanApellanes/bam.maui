@@ -23,6 +23,9 @@ public sealed class FakeResponse
 
     /// <summary>Send the headers and part of the body, then drop the connection.</summary>
     public bool BreakBody { get; init; }
+
+    /// <summary>Send the headers, then wait; when the read is cancelled, fail with a plain IOException as some host streams do.</summary>
+    public bool IoErrorOnCancel { get; init; }
 }
 
 /// <summary>
@@ -62,7 +65,13 @@ public sealed class FakeAccountEndpoints : HttpMessageHandler
             throw next.Throw;
         }
         HttpResponseMessage response = new HttpResponseMessage(next.Status);
-        if (next.BreakBody)
+        if (next.IoErrorOnCancel)
+        {
+            StreamContent failing = new StreamContent(new IoErrorOnCancelStream());
+            failing.Headers.TryAddWithoutValidation("Content-Type", next.ContentType);
+            response.Content = failing;
+        }
+        else if (next.BreakBody)
         {
             StreamContent broken = new StreamContent(new BreakingStream(Encoding.UTF8.GetBytes("{\"passkeys\":[")));
             broken.Headers.TryAddWithoutValidation("Content-Type", next.ContentType);
@@ -149,6 +158,39 @@ public sealed class FakeAccountEndpoints : HttpMessageHandler
                 return ValueTask.FromResult(_start.Length);
             }
             throw new HttpIOException(HttpRequestError.ResponseEnded, "connection to 10.0.0.7:443 reset by peer");
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        }
+    }
+
+    /// <summary>A body that never arrives and reports a cancelled read as an IOException instead of a cancellation.</summary>
+    private sealed class IoErrorOnCancelStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException("Read asynchronously.");
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw new IOException("The read was aborted.");
+            }
+            return 0;
         }
 
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)

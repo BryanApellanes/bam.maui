@@ -188,6 +188,60 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
         .UnlessItFailed();
     }
 
+    [UnitTest]
+    public void ValidateScreenTextAndExperience()
+    {
+        After.Setup(reg => reg.Set(PasskeyClientFixture.ValidConfiguration()))
+        .When<PasskeyConfiguration>("validates the screen text and experience defaults and each broken variant", (configuration, reg) =>
+        {
+            return new ScreenOutcome(
+                ThrowsFor(c => c.Text = null!),
+                ThrowsFor(c => c.Experience = null!),
+                ThrowsFor(c => c.Text.SignInTitle = " "),
+                ThrowsFor(c => c.Text.DeviceSetupHint = null!),
+                BlankTextAccepted(),
+                ThrowsFor(c => c.Text.PasskeyBenefits = null!),
+                ThrowsFor(c => c.Text.PasskeyBenefits = new[] { "Fast", " " }),
+                !ThrowsFor(c => c.Text.PasskeyBenefits = Array.Empty<string>()),
+                ThrowsFor(c => c.Experience.SignInMode = (PasskeySignInMode)42),
+                ThrowsFor(c => c.Experience.AlternativeSignInLabel = "  "),
+                !ThrowsFor(c => c.Experience.AlternativeSignInLabel = "Email me a link"),
+                configuration.Experience.SignInMode,
+                configuration.Experience.OfferRegistration,
+                configuration.Experience.AskForEmail || configuration.Experience.AskForInviteCode,
+                PasskeyText.WithName("Sign in to {0} {1} {", "Example"),
+                PasskeyText.WithName("Hi {0}", null!));
+        })
+        .TheTest
+        .ShouldPass<ScreenOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("null text is refused", outcome.NullText);
+            because.ItsTrue("a null experience is refused", outcome.NullExperience);
+            because.ItsTrue("a blank title is refused", outcome.BlankTitle);
+            because.ItsTrue("a null hint is refused", outcome.NullHint);
+            because.ItsTrue("no blank text member is accepted: " + outcome.BlankAccepted, outcome.BlankAccepted.Length == 0);
+            because.ItsTrue("null benefits are refused", outcome.NullBenefits);
+            because.ItsTrue("a blank benefit line is refused", outcome.BlankBenefit);
+            because.ItsTrue("no benefits at all is accepted", outcome.NoBenefitsAccepted);
+            because.ItsTrue("an undefined sign-in mode is refused", outcome.UndefinedMode);
+            because.ItsTrue("a blank alternative label is refused", outcome.BlankAlternative);
+            because.ItsTrue("an alternative label is accepted", outcome.AlternativeAccepted);
+            because.ItsTrue("choice is the default sign-in mode", outcome.DefaultMode == PasskeySignInMode.Choice);
+            because.ItsTrue("registration is offered by default", outcome.OffersRegistration);
+            because.ItsTrue("email and invite code are not asked for by default", !outcome.AsksForExtras);
+            because.ItsTrue("only {0} is replaced, and stray braces don't throw: " + outcome.Named, outcome.Named == "Sign in to Example {1} {");
+            because.ItsTrue("a null app name reads as empty: " + outcome.NullName, outcome.NullName == "Hi ");
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    private static string BlankTextAccepted()
+    {
+        IEnumerable<System.Reflection.PropertyInfo> members = typeof(PasskeyText).GetProperties().Where(p => p.PropertyType == typeof(string));
+        return string.Join(",", members.Where(p => !ThrowsFor(c => p.SetValue(c.Text, "\t"))).Select(p => p.Name));
+    }
+
     private static PasskeyErrorCategory Category(PasskeyAvailability availability)
     {
         return new PasskeyCapabilities { Availability = availability }.ToErrorCategory();
@@ -264,6 +318,10 @@ public class PasskeyConfigurationShould : UnitTestMenuContainer
     private sealed record BrandingOutcome(bool DefaultsValid, bool ArgbAccepted, bool BlankName, bool NamedColour, bool ShortColour, bool ColourWithNewline, bool NullColour, bool NegativeRadius, bool NanRadius, bool OptionalValuesAccepted);
 
     private sealed record CapabilityOutcome(bool DefaultSupported, PasskeyAvailability DefaultAvailability, PasskeyErrorCategory Available, bool AvailableSupported, PasskeyErrorCategory NotSupported, PasskeyErrorCategory OldOs, PasskeyErrorCategory MissingProvider, PasskeyErrorCategory NoDeviceSecurity, string Platform, bool UnsupportedAuthenticatorSupported);
+
+    private sealed record ScreenOutcome(bool NullText, bool NullExperience, bool BlankTitle, bool NullHint, string BlankAccepted, bool NullBenefits, bool BlankBenefit,
+        bool NoBenefitsAccepted, bool UndefinedMode, bool BlankAlternative, bool AlternativeAccepted, PasskeySignInMode DefaultMode, bool OffersRegistration, bool AsksForExtras,
+        string Named, string NullName);
 
     private sealed record PayloadOutcome(bool BlankCreation, bool EmptyRequest, bool NullRegistration, bool BlankAssertion, string CreationText, string AssertionText, string RequestText, string ChallengeText, string RegistrationChallengeText);
 }
