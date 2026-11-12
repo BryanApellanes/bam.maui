@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Builds without the MAUI workload (bam.maui#12)
+
+Changed
+- `UseMaui` and `SingleProject` are set only when a platform target is in `TargetFrameworks`. A `net10.0`-only build (inside `bamtk.sln`, with `-p:BamPlatformTargets=false`, or any build on Linux) restores on an SDK with no workloads.
+- `-p:BamPlatformTargets=false` turns the platform targets off, as building inside `bamtk.sln` does. bamtest passes it to the test projects it builds (bamtest#3).
+- Only a global `BamPlatformTargets` (`-p:` or a parent build's properties) counts. A value from the environment, in any letter case, or from a props file is ignored, with warning `BAMMAUI001`. An exported variable would reach an app's build too and silently give it the `net10.0` build, which has no native authenticator. An explicit `-p:` wins even when the variable is also exported. The warning runs as an initial target, so it shows before the SDK's workload check and during restore.
+
 ### Phase 3: HTTP backend (bam.maui#6)
 
 Added
