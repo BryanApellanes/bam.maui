@@ -19,6 +19,9 @@ public sealed class FakePasskeyNavigator : IPasskeyNavigator
     /// <summary>Thrown by AlternativeSignInRequestedAsync while set.</summary>
     public Exception? AlternativeFailure { get; set; }
 
+    /// <summary>Holds AlternativeSignInRequestedAsync open until a test completes it, as a slow page push would.</summary>
+    public TaskCompletionSource? AlternativeGate { get; set; }
+
     /// <summary>Runs inside SignedInAsync, while the screen is still on its success state.</summary>
     public Action? WhileSignedIn { get; set; }
 
@@ -35,14 +38,17 @@ public sealed class FakePasskeyNavigator : IPasskeyNavigator
         return Task.CompletedTask;
     }
 
-    public Task AlternativeSignInRequestedAsync()
+    public async Task AlternativeSignInRequestedAsync()
     {
         Calls.Add("alternative");
+        if (AlternativeGate is not null)
+        {
+            await AlternativeGate.Task;
+        }
         if (AlternativeFailure is not null)
         {
             throw AlternativeFailure;
         }
-        return Task.CompletedTask;
     }
 
     public Task RegistrationRequestedAsync()

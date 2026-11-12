@@ -291,6 +291,44 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
         .UnlessItFailed();
     }
 
+    [UnitTest]
+    public void LeaveANewerErrorAloneWhenAnOlderLinkFinishes()
+    {
+        After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
+        .When<ScriptedPasskeyClient>("fails, starts a slow link, follows a second link that fails at once, then the slow link finishes", (client, reg) =>
+        {
+            FakePasskeyNavigator navigator = new FakePasskeyNavigator
+            {
+                AlternativeGate = new TaskCompletionSource(),
+                RegistrationFailure = new InvalidOperationException("route not found")
+            };
+            PasskeyConfiguration configuration = PasskeyClientFixture.ValidConfiguration();
+            configuration.Experience.AlternativeSignInLabel = "Email me a link";
+            PasskeySignInViewModel screen = new PasskeySignInViewModel(client, configuration, navigator);
+            client.SignInResults.Enqueue(ScriptedPasskeyClient.Failed(PasskeyErrorCategory.NoCredentials));
+            Wait(screen.SignInCommand.ExecuteAsync());
+            string firstMessage = screen.ErrorMessage;
+
+            Task slowLink = screen.UseAnotherWayCommand.ExecuteAsync();
+            Wait(screen.GoToRegistrationCommand.ExecuteAsync());
+            string newerMessage = screen.ErrorMessage;
+            navigator.AlternativeGate.SetResult();
+            Wait(slowLink);
+            return new NewerErrorOutcome(firstMessage, newerMessage, screen.State, screen.ErrorMessage, screen.OffersBack,
+                configuration.Messages.For(PasskeyErrorCategory.Unknown));
+        })
+        .TheTest
+        .ShouldPass<NewerErrorOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("the second link's failure replaces the first error: " + outcome.NewerMessage,
+                outcome.NewerMessage == outcome.UnknownMessage && outcome.FirstMessage != outcome.UnknownMessage);
+            because.ItsTrue("the older link finishing leaves the newer error up: " + outcome.Final,
+                outcome.Final == PasskeyViewState.Failed && outcome.FinalMessage == outcome.UnknownMessage && outcome.FinalBack);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
     private static CheckScreen Check(PasskeySignInViewModel screen)
     {
         return new CheckScreen(screen.State, screen.ErrorTitle, screen.ErrorMessage, screen.TryAgainCommand.CanExecute(null), screen.OffersBack,
@@ -480,6 +518,9 @@ public class PasskeySignInViewModelShould : UnitTestMenuContainer
 
     private sealed record NavigationOutcome(string? Escaped, NavigationFailure Broken, PasskeyViewState AfterRetry, int Ceremonies, string NavigatorCalls, PasskeyViewState AfterBrokenLink,
         PasskeyViewState AfterBack, PasskeyViewState AfterLoad, bool SignInAfterLoad, string Logged, string UnknownMessage);
+
+    private sealed record NewerErrorOutcome(string FirstMessage, string NewerMessage, PasskeyViewState Final, string FinalMessage, bool FinalBack,
+        string UnknownMessage);
 
     private sealed record CheckScreen(PasskeyViewState State, string Title, string Message, bool TryAgain, bool Back, bool SignIn)
     {

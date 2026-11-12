@@ -35,6 +35,9 @@ Review round 3 (bam.maui#16)
 - The blank sign-in screen while `SignedInAsync` runs is bam.maui#17, for Phase 5.
 - 1 more unit test (73 in all).
 
+Review round 4 (bam.maui#16)
+- A unit test pins the "leave a newer error alone" guard: a slow link that finishes after a second link failed leaves the second error up (74 in all).
+
 Fixed (nit from the bam.maui#9 review)
 - A transport failure while the caller's own token is cancelled is reported as a cancellation, not `NetworkFailure`. Some handlers fail the body read with an `IOException` instead of an `OperationCanceledException` when the request is aborted.
 
