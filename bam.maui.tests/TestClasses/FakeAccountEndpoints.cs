@@ -20,6 +20,9 @@ public sealed class FakeResponse
 
     /// <summary>Send the headers, then never send the body.</summary>
     public bool StallBody { get; init; }
+
+    /// <summary>Send the headers and part of the body, then drop the connection.</summary>
+    public bool BreakBody { get; init; }
 }
 
 /// <summary>
@@ -59,7 +62,13 @@ public sealed class FakeAccountEndpoints : HttpMessageHandler
             throw next.Throw;
         }
         HttpResponseMessage response = new HttpResponseMessage(next.Status);
-        if (next.StallBody)
+        if (next.BreakBody)
+        {
+            StreamContent broken = new StreamContent(new BreakingStream(Encoding.UTF8.GetBytes("{\"passkeys\":[")));
+            broken.Headers.TryAddWithoutValidation("Content-Type", next.ContentType);
+            response.Content = broken;
+        }
+        else if (next.StallBody)
         {
             StreamContent stalled = new StreamContent(new StallingStream());
             stalled.Headers.TryAddWithoutValidation("Content-Type", next.ContentType);
@@ -101,6 +110,45 @@ public sealed class FakeAccountEndpoints : HttpMessageHandler
         {
             await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
             return 0;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            return ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        }
+    }
+
+    /// <summary>A body that sends its first bytes and then fails the way a dropped connection does.</summary>
+    private sealed class BreakingStream : Stream
+    {
+        private readonly byte[] _start;
+        private bool _sent;
+
+        public BreakingStream(byte[] start)
+        {
+            _start = start;
+        }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException("Read asynchronously.");
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (!_sent)
+            {
+                _sent = true;
+                _start.CopyTo(buffer);
+                return ValueTask.FromResult(_start.Length);
+            }
+            throw new HttpIOException(HttpRequestError.ResponseEnded, "connection to 10.0.0.7:443 reset by peer");
         }
 
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)

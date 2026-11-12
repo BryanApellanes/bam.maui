@@ -241,7 +241,7 @@ public class HttpPasskeyBackendShould : UnitTestMenuContainer
                 }
             }
 
-            // A transport failure is thrown as it is; the normalizer makes it a network failure.
+            // A transport failure becomes a network failure, whether it reaches the normalizer as it is or already wrapped.
             FakeAccountEndpoints offline = new FakeAccountEndpoints().Respond(new FakeResponse { Throw = new HttpRequestException("offline") });
             using HttpPasskeyBackend offlineBackend = Backend(offline);
             Exception? transport = null;
@@ -473,6 +473,42 @@ public class HttpPasskeyBackendShould : UnitTestMenuContainer
         .UnlessItFailed();
     }
 
+    [UnitTest]
+    public void ReportADroppedConnectionAsANetworkFailure()
+    {
+        After.Setup(reg => reg.Set(new FakeAccountEndpoints()))
+        .When<FakeAccountEndpoints>("loses the connection before the response, and again in the middle of the body", (unused, reg) =>
+        {
+            FakeAccountEndpoints refused = new FakeAccountEndpoints().Respond(new FakeResponse { Throw = new HttpRequestException("No such host is known. (accounts.internal.example:443)") });
+            using HttpPasskeyBackend before = Backend(refused);
+            PasskeyException? send = Caught(() => before.GetPasskeysAsync());
+
+            FakeAccountEndpoints dropped = new FakeAccountEndpoints().Respond(new FakeResponse { BreakBody = true });
+            using HttpPasskeyBackend during = Backend(dropped);
+            PasskeyException? body = Caught(() => during.GetPasskeysAsync());
+
+            return new DroppedOutcome(
+                send?.Category,
+                send?.InnerException is HttpRequestException,
+                send?.Message.Contains("accounts.internal", StringComparison.Ordinal) ?? false,
+                body?.Category,
+                body?.InnerException is HttpIOException,
+                body?.Message.Contains("10.0.0.7", StringComparison.Ordinal) ?? false);
+        })
+        .TheTest
+        .ShouldPass<DroppedOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("a failed send is a network failure, got " + outcome.Send, outcome.Send == PasskeyErrorCategory.NetworkFailure);
+            because.ItsTrue("which keeps the transport exception inside", outcome.SendInner);
+            because.ItsTrue("but does not quote it", !outcome.SendQuoted);
+            because.ItsTrue("a connection dropped mid-body is a network failure, got " + outcome.Body, outcome.Body == PasskeyErrorCategory.NetworkFailure);
+            because.ItsTrue("which keeps the HttpIOException inside", outcome.BodyInner);
+            because.ItsTrue("but does not quote it", !outcome.BodyQuoted);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
     private static HttpPasskeyBackend Backend(FakeAccountEndpoints fake, PasskeyHttpBackendOptions? options = null)
     {
         return HttpPasskeyBackend.Create(PasskeyClientFixture.ValidConfiguration(), options, fake);
@@ -553,6 +589,8 @@ public class HttpPasskeyBackendShould : UnitTestMenuContainer
     private sealed record EndpointOutcome(string Default, string Resolved, string NotRefused);
 
     private sealed record CodeOutcome(PasskeyErrorCategory? Category, string? Code, bool AppMessage, string NewMessages, bool Bound, bool KeptExisting);
+
+    private sealed record DroppedOutcome(PasskeyErrorCategory? Send, bool SendInner, bool SendQuoted, PasskeyErrorCategory? Body, bool BodyInner, bool BodyQuoted);
 
     private sealed record StallOutcome(PasskeyErrorCategory? OwnClient, PasskeyErrorCategory? HostClient, long ElapsedMilliseconds, string CallerCancel, bool FollowsRedirects, bool UsesCookies);
 }

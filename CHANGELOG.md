@@ -9,12 +9,15 @@ Added
 - `PasskeySessionCookieJar`, which keeps the session cookie in front of the platform's HTTP handler.
 - `PasskeyErrorCategory.NotSignedIn` and `RateLimited`, with messages.
 - `PasskeyException.BackendCode` and `PasskeyError.BackendCode`; the normalizer carries the code across.
-- 8 unit tests (47 in all): suite `pkhb`.
+- 9 unit tests (48 in all): suite `pkhb`.
 
 Review round 1 (bam.maui#9)
 - `PasskeyHttpBackendOptions.Timeout` now bounds the whole exchange, body read included, for the backend's own client and for a host's `HttpClient`; a timeout is `NetworkFailure`.
 - An empty or non-object success body on `GET passkeys` (and for the optional members of any response) is `InvalidServerResponse`, not an unhandled exception.
 - The platform handler's settings (redirects off, cookies off) are pinned by a test; the README says a host's own `HttpClient` must not follow redirects.
+
+Review round 2 (bam.maui#9)
+- A connection that fails before the response (`HttpRequestException`) or drops mid-body (`IOException`, including `HttpIOException`) is `NetworkFailure`. The response is disposed. The transport exception is kept as the inner exception, and its text is not quoted.
 
 Decisions
 - BCL `HttpClient`. bamtk's `bam.protocol.client` speaks the signed bam protocol, not a cookie-session JSON API, so it doesn't fit here.

@@ -355,6 +355,13 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
             received?.Dispose();
             throw new PasskeyException(PasskeyErrorCategory.NetworkFailure, $"The account endpoint {route} did not answer within {_timeout.TotalSeconds:0.#} s.");
         }
+        catch (Exception failed) when (failed is HttpRequestException || failed is IOException)
+        {
+            // A refused connection, a TLS failure or a connection dropped mid-body (HttpIOException is an IOException).
+            // The inner message can quote hosts and socket details, so it is kept as the inner exception, not quoted.
+            received?.Dispose();
+            throw new PasskeyException(PasskeyErrorCategory.NetworkFailure, $"The account endpoint {route} could not be reached.", failed);
+        }
         catch
         {
             received?.Dispose();
