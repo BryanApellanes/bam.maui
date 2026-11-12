@@ -136,9 +136,16 @@ public sealed class ApplePasskeyAuthenticator : PlatformPasskeyAuthenticator
         }
         try
         {
+            // The token ends the wait by itself; the sheet is closed on the main thread afterwards.
+            using PlatformCeremony<AppleOutcome> pending = ceremony.Listen(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             await MainThread.InvokeOnMainThreadAsync(() => ceremony.Start(createRequest())).ConfigureAwait(false);
-            using CancellationTokenRegistration registration = cancellationToken.Register(() => MainThread.BeginInvokeOnMainThread(ceremony.Cancel));
-            return await ceremony.Completion.ConfigureAwait(false);
+            AppleOutcome outcome = await pending.Completion.ConfigureAwait(false);
+            if (outcome.Failure is not null)
+            {
+                throw outcome.Failure;
+            }
+            return outcome.Authorization!;
         }
         finally
         {
@@ -175,21 +182,33 @@ public sealed class ApplePasskeyAuthenticator : PlatformPasskeyAuthenticator
         };
     }
 
-    /// <summary>One sheet: the controller, its delegate and the task the result arrives on.</summary>
+    private sealed record AppleOutcome(ASAuthorization? Authorization, PasskeyException? Failure);
+
+    /// <summary>One sheet: the controller, its delegate and the pending result.  Start, Cancel and the delegate run on the main thread.</summary>
     private sealed class Ceremony : ASAuthorizationControllerDelegate, IASAuthorizationControllerPresentationContextProviding
     {
-        private readonly TaskCompletionSource<ASAuthorization> _completion = new TaskCompletionSource<ASAuthorization>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private PlatformCeremony<AppleOutcome>? _pending;
         private ASAuthorizationController? _controller;
         private UIWindow? _window;
+        private bool _finished;
 
-        public Task<ASAuthorization> Completion => _completion.Task;
+        public PlatformCeremony<AppleOutcome> Listen(CancellationToken cancellationToken)
+        {
+            _pending = new PlatformCeremony<AppleOutcome>(cancellationToken, () => MainThread.BeginInvokeOnMainThread(Cancel));
+            return _pending;
+        }
 
         public void Start(ASAuthorizationRequest request)
         {
+            // A token that fired before the sheet was shown: show nothing.
+            if (_pending is null || _pending.IsCompleted)
+            {
+                return;
+            }
             _window = Platform.GetCurrentUIViewController()?.View?.Window;
             if (_window is null)
             {
-                _completion.TrySetException(new PasskeyException(PasskeyErrorCategory.PlatformFailure, "There is no window to show the passkey sheet over."));
+                Finish(new AppleOutcome(null, new PasskeyException(PasskeyErrorCategory.PlatformFailure, "There is no window to show the passkey sheet over.")));
                 return;
             }
             _controller = new ASAuthorizationController(new ASAuthorizationRequest[] { request });
@@ -200,7 +219,8 @@ public sealed class ApplePasskeyAuthenticator : PlatformPasskeyAuthenticator
 
         public void Cancel()
         {
-            if (_controller is null || _completion.Task.IsCompleted)
+            // The pending result is already cancelled by now; this only closes a sheet that is still up.
+            if (_controller is null || _finished)
             {
                 return;
             }
@@ -213,14 +233,20 @@ public sealed class ApplePasskeyAuthenticator : PlatformPasskeyAuthenticator
 
         public override void DidComplete(ASAuthorizationController controller, ASAuthorization authorization)
         {
-            _completion.TrySetResult(authorization);
+            Finish(new AppleOutcome(authorization, null));
         }
 
         public override void DidComplete(ASAuthorizationController controller, NSError error)
         {
             // Domain and code only: the description can name the app and the relying party.
             PasskeyErrorCategory category = ApplePasskeyErrors.Categorize(error.Domain, (long)error.Code);
-            _completion.TrySetException(new PasskeyException(category, $"AuthenticationServices reported {error.Domain} code {(long)error.Code}."));
+            Finish(new AppleOutcome(null, new PasskeyException(category, $"AuthenticationServices reported {error.Domain} code {(long)error.Code}.")));
+        }
+
+        private void Finish(AppleOutcome outcome)
+        {
+            _finished = true;
+            _pending?.Report(outcome);
         }
 
         public UIWindow GetPresentationAnchor(ASAuthorizationController controller)

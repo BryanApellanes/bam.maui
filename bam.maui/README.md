@@ -184,14 +184,14 @@ Run these on each platform against a backend whose RP id matches the app's confi
 4. `AuthenticateWithUsernameAsync` signs in with that passkey.
 5. `AuthenticateAsync` (no username) offers the passkey and signs in.
 6. Dismiss the prompt: the result is `UserCancelled` and `WasCancelled` is true.
-7. Cancel the token while the prompt is up: the result is `UserCancelled` at once, and the prompt closes. On Android the result does not wait for Credential Manager to call back.
+7. Cancel the token while the prompt is up: the result is `UserCancelled` at once, and the prompt closes. On Android and Apple the result does not wait for the platform to call back. If a credential provider ignores the cancel and the user finishes anyway, a registration can leave a passkey on the device that the server never recorded; it can't sign in, and the user can delete it in the provider.
 8. `AddPasskeyAsync` on a device that already holds a passkey for the account: `CredentialAlreadyRegistered` on Android and Windows. On Apple the backend refuses the duplicate instead, because the exclude list isn't passed there yet.
 9. Sign in with a username that has no passkey on the device: `NoCredentials` on Android and Windows.
 10. Point the app at options for another RP id: `InvalidOptions`, and no system prompt appears.
 11. Android only: break `assetlinks.json` and confirm the ceremony fails rather than succeeding.
 12. iOS only: remove the associated domain and confirm the ceremony fails with `PlatformFailure`.
 
-Known unknown these steps settle: whether the Apple sheet needs anything beyond the current view controller's window as its anchor. (Android errors are mapped by Credential Manager's type strings, which survive R8 renaming the exception classes; the Java class name is only a fallback.)
+Known unknown these steps settle: whether the Apple sheet needs anything beyond the current view controller's window as its anchor. (Android errors are mapped by instance-of checks against the bound exception classes, not by class name or message.)
 
 ### Branding
 

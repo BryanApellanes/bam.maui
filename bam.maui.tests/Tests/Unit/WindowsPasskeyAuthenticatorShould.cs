@@ -31,7 +31,7 @@ public class WindowsPasskeyAuthenticatorShould : UnitTestMenuContainer
 
             FakeWindowsWebAuthnApi required = new FakeWindowsWebAuthnApi();
             Wait(Authenticator(required).CreateAsync(new WebAuthnCreationOptions(
-                "{\"rp\":{\"id\":\"example.com\"},\"user\":{\"id\":\"AQID\",\"name\":\"ada\"},\"challenge\":\"BAUG\",\"pubKeyCredParams\":[{\"type\":\"public-key\",\"alg\":-7}],\"authenticatorSelection\":{\"requireResidentKey\":true}}")));
+                "{\"rp\":{\"id\":\"example.com\"},\"user\":{\"id\":\"AQID\",\"name\":\"ada\"},\"challenge\":\"BAUG\",\"pubKeyCredParams\":[{\"type\":\"public-key\",\"alg\":-7}],\"authenticatorSelection\":{\"requireResidentKey\":true},\"attestation\":\"enterprise\"}")));
 
             return new CreateOutcome(
                 api.Window == Window,
@@ -58,7 +58,7 @@ public class WindowsPasskeyAuthenticatorShould : UnitTestMenuContainer
             because.ItsTrue("platform attachment, preferred resident key, required verification, direct attestation: " + outcome.Selection, outcome.Selection == "1|False|True|1|3");
             because.ItsTrue("the response carries the id, attachment, attestation object and transport: " + outcome.Response, outcome.Response == "3q0|platform|CQgH|internal");
             because.ItsTrue("the response carries the client data that was signed", outcome.ClientDataCarried);
-            because.ItsTrue("requireResidentKey alone is required; defaults fill the rest: " + outcome.RequiredDefaults, outcome.RequiredDefaults == "True|False|60000|0|1");
+            because.ItsTrue("requireResidentKey alone is required, enterprise attestation asks for none, defaults fill the rest: " + outcome.RequiredDefaults, outcome.RequiredDefaults == "True|False|60000|0|1");
         })
         .SoBeHappy()
         .UnlessItFailed();

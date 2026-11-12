@@ -4,6 +4,7 @@ using Android.OS;
 using AndroidX.Core.Content;
 using AndroidX.Credentials;
 using AndroidX.Credentials.Exceptions;
+using AndroidX.Credentials.Exceptions.DomErrors;
 using AndroidX.Credentials.Exceptions.PublicKeyCredential;
 using Java.Util.Concurrent;
 
@@ -111,68 +112,98 @@ public sealed class AndroidPasskeyAuthenticator : PlatformPasskeyAuthenticator
         {
             return outcome.Value;
         }
-        // The exception's type string is Credential Manager's stable contract (the class name is
-        // the app's R8 settings' to change).  The class name is only a fallback for an error that
-        // is not a Credential Manager exception.  Never the message: it can quote the request.
-        string? errorType = ErrorTypeOf(outcome.Value, creating);
-        PasskeyErrorCategory category;
-        string reported;
-        if (errorType is not null)
-        {
-            category = AndroidPasskeyErrors.CategorizeType(errorType);
-            reported = AndroidPasskeyErrors.Printable(errorType);
-        }
-        else
-        {
-            string? exceptionClass = outcome.Value?.Class?.Name;
-            category = AndroidPasskeyErrors.Categorize(exceptionClass, DomErrorClassOf(outcome.Value, exceptionClass));
-            reported = exceptionClass ?? "an unknown error";
-        }
-        throw new PasskeyException(category, $"Credential Manager reported {reported} while {(creating ? "creating a passkey" : "signing in")}.");
+        // Instance-of checks against the bound public exception classes: no message (it can quote
+        // the request) and no getType() (androidx marks it @RestrictTo(LIBRARY_GROUP)).
+        Java.Lang.Object? error = outcome.Value;
+        AndroidCredentialError kind = KindOf(error);
+        AndroidDomError domError = DomErrorOf(error, kind);
+        PasskeyErrorCategory category = AndroidPasskeyErrors.Categorize(kind, domError);
+        throw new PasskeyException(category, $"Credential Manager reported {kind} ({domError}) while {(creating ? "creating a passkey" : "signing in")}.");
     }
 
-    // The callback's error arrives typed as a plain Java object; it is cast to the exception base the ceremony reports.
-    private static string? ErrorTypeOf(Java.Lang.Object? error, bool creating)
+    private static AndroidCredentialError KindOf(Java.Lang.Object? error)
     {
         if (error is null)
         {
-            return null;
+            return AndroidCredentialError.Other;
         }
-        try
+        if (Is<CreateCredentialCancellationException>(error) || Is<GetCredentialCancellationException>(error))
         {
-            return creating
-                ? Android.Runtime.Extensions.JavaCast<CreateCredentialException>(error)?.Type
-                : Android.Runtime.Extensions.JavaCast<GetCredentialException>(error)?.Type;
+            return AndroidCredentialError.Cancelled;
         }
-        catch (Exception exception) when (exception is InvalidCastException or Java.Lang.ClassCastException)
+        if (Is<NoCredentialException>(error))
         {
-            return null;
+            return AndroidCredentialError.NoCredential;
         }
+        if (Is<CreateCredentialNoCreateOptionException>(error))
+        {
+            return AndroidCredentialError.NoCreateOption;
+        }
+        if (Is<CreateCredentialProviderConfigurationException>(error) || Is<GetCredentialProviderConfigurationException>(error))
+        {
+            return AndroidCredentialError.ProviderConfiguration;
+        }
+        if (Is<CreateCredentialUnsupportedException>(error) || Is<GetCredentialUnsupportedException>(error))
+        {
+            return AndroidCredentialError.Unsupported;
+        }
+        if (Is<CreatePublicKeyCredentialDomException>(error))
+        {
+            return AndroidCredentialError.CreateDomError;
+        }
+        if (Is<GetPublicKeyCredentialDomException>(error))
+        {
+            return AndroidCredentialError.GetDomError;
+        }
+        return AndroidCredentialError.Other;
     }
 
-    // Fallback only: casts to the DOM exception by its Java class.
-    private static string? DomErrorClassOf(Java.Lang.Object? error, string? exceptionClass)
+    private static AndroidDomError DomErrorOf(Java.Lang.Object? error, AndroidCredentialError kind)
     {
-        if (error is null)
+        Java.Lang.Object? domError = kind switch
         {
-            return null;
-        }
-        try
+            AndroidCredentialError.CreateDomError => Cast<CreatePublicKeyCredentialDomException>(error)?.DomError,
+            AndroidCredentialError.GetDomError => Cast<GetPublicKeyCredentialDomException>(error)?.DomError,
+            _ => null
+        };
+        if (domError is null)
         {
-            if (exceptionClass == AndroidPasskeyErrors.CreateDomException)
-            {
-                return Android.Runtime.Extensions.JavaCast<CreatePublicKeyCredentialDomException>(error)?.DomError?.Class?.Name;
-            }
-            if (exceptionClass == AndroidPasskeyErrors.GetDomException)
-            {
-                return Android.Runtime.Extensions.JavaCast<GetPublicKeyCredentialDomException>(error)?.DomError?.Class?.Name;
-            }
+            return AndroidDomError.Other;
         }
-        catch (InvalidCastException)
+        if (Is<InvalidStateError>(domError))
         {
-            // Not the class its name said; the exception is categorized without a DOM error.
+            return AndroidDomError.InvalidState;
         }
-        return null;
+        if (Is<TimeoutError>(domError))
+        {
+            return AndroidDomError.Timeout;
+        }
+        if (Is<DataError>(domError))
+        {
+            return AndroidDomError.Data;
+        }
+        if (Is<ConstraintError>(domError))
+        {
+            return AndroidDomError.Constraint;
+        }
+        if (Is<NotSupportedError>(domError))
+        {
+            return AndroidDomError.NotSupported;
+        }
+        if (Is<SyntaxError>(domError))
+        {
+            return AndroidDomError.Syntax;
+        }
+        if (Is<EncodingError>(domError))
+        {
+            return AndroidDomError.Encoding;
+        }
+        return AndroidDomError.Other;
+    }
+
+    private static bool Is<TJava>(Java.Lang.Object value) where TJava : class, Android.Runtime.IJavaObject
+    {
+        return Java.Lang.Class.FromType(typeof(TJava)).IsInstance(value);
     }
 
     private static TResult? Cast<TResult>(Java.Lang.Object? value) where TResult : class, Android.Runtime.IJavaObject
