@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Phase 3: HTTP backend (bam.maui#6)
+
+Added
+- `HttpPasskeyBackend`, an `IPasskeyBackend` over the bam account endpoints (`bam.useraccounts.web`), with `PasskeyHttpBackendOptions` and `AddHttpPasskeyBackend`.
+- `PasskeySessionCookieJar`, which keeps the session cookie in front of the platform's HTTP handler.
+- `PasskeyErrorCategory.NotSignedIn` and `RateLimited`, with messages.
+- `PasskeyException.BackendCode` and `PasskeyError.BackendCode`; the normalizer carries the code across.
+- 9 unit tests (48 in all): suite `pkhb`.
+
+Review round 1 (bam.maui#9)
+- `PasskeyHttpBackendOptions.Timeout` now bounds the whole exchange, body read included, for the backend's own client and for a host's `HttpClient`; a timeout is `NetworkFailure`.
+- An empty or non-object success body on `GET passkeys` (and for the optional members of any response) is `InvalidServerResponse`, not an unhandled exception.
+- The platform handler's settings (redirects off, cookies off) are pinned by a test; the README says a host's own `HttpClient` must not follow redirects.
+
+Review round 2 (bam.maui#9)
+- A connection that fails before the response (`HttpRequestException`) or drops mid-body (`IOException`, including `HttpIOException`) is `NetworkFailure`. The response is disposed. The transport exception is kept as the inner exception, and its text is not quoted.
+
+Decisions
+- BCL `HttpClient`. bamtk's `bam.protocol.client` speaks the signed bam protocol, not a cookie-session JSON API, so it doesn't fit here.
+- The session cookie is kept by the library's own `DelegatingHandler`, not by the platform handler's cookie support, which differs between Android, Apple and Windows.
+- The endpoint's code, not its message, decides the category. Sign-up refusals share `InvalidOptions` and are told apart by `BackendCode`, rather than one category each.
+- The account endpoint must be the relying party or a subdomain of it.
+
+Outstanding
+- Not run against a live host yet.
+- Not on the seam yet: rename, sign-out, the handle availability check, `profileCreated`, and the delete response's `signedOut`. These come with phases 4 and 5. Moving the key set when the key-set passkey is removed is bam.maui#7.
+
 ### Phase 2: native authenticators (bam.maui#4)
 
 Added

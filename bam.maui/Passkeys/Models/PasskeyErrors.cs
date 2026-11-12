@@ -48,6 +48,12 @@ public enum PasskeyErrorCategory
     /// <summary>The device already holds a passkey for this account, so another was not created.</summary>
     CredentialAlreadyRegistered,
 
+    /// <summary>The backend needs a signed-in session and has none (it expired, or the user signed out).</summary>
+    NotSignedIn,
+
+    /// <summary>The backend is limiting requests; trying again later may work.</summary>
+    RateLimited,
+
     /// <summary>Anything else.</summary>
     Unknown
 }
@@ -61,11 +67,20 @@ public sealed record PasskeyError
     /// <summary>Creates an error.</summary>
     /// <param name="category">Why the operation failed.</param>
     /// <param name="message">The user-facing message, taken from <see cref="PasskeyMessages"/>.</param>
-    public PasskeyError(PasskeyErrorCategory category, string message)
+    /// <param name="backendCode">The backend's own refusal code, when it sent one (see <see cref="BackendCode"/>).</param>
+    public PasskeyError(PasskeyErrorCategory category, string message, string? backendCode = null)
     {
         Category = category;
         Message = message;
+        BackendCode = backendCode;
     }
+
+    /// <summary>
+    /// The backend's coarse refusal code, when the backend sent one (for the bam account endpoints,
+    /// one of their <c>AccountErrorCodes</c>, such as <c>HandleTaken</c> or <c>InviteRequired</c>).
+    /// It lets a screen tell refusals within a category apart; it is a code, never text to show.
+    /// </summary>
+    public string? BackendCode { get; }
 
     /// <summary>Why the operation failed.</summary>
     public PasskeyErrorCategory Category { get; }
@@ -88,11 +103,16 @@ public sealed class PasskeyException : Exception
     /// <param name="category">Why the operation failed.</param>
     /// <param name="diagnosticMessage">A message for developers; must not contain secrets or WebAuthn payloads.</param>
     /// <param name="innerException">The platform or transport exception, if any.</param>
-    public PasskeyException(PasskeyErrorCategory category, string? diagnosticMessage = null, Exception? innerException = null)
+    /// <param name="backendCode">The backend's coarse refusal code, if it sent one; see <see cref="PasskeyError.BackendCode"/>.</param>
+    public PasskeyException(PasskeyErrorCategory category, string? diagnosticMessage = null, Exception? innerException = null, string? backendCode = null)
         : base(diagnosticMessage ?? $"Passkey operation failed: {category}.", innerException)
     {
         Category = category;
+        BackendCode = backendCode;
     }
+
+    /// <summary>The backend's coarse refusal code, if it sent one.</summary>
+    public string? BackendCode { get; }
 
     /// <summary>Why the operation failed.</summary>
     public PasskeyErrorCategory Category { get; }
