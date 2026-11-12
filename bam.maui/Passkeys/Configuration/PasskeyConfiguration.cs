@@ -29,6 +29,12 @@ public sealed class PasskeyConfiguration
     /// <summary>The user-facing text for each failure; replace members to localize or reword.</summary>
     public PasskeyMessages Messages { get; set; } = new PasskeyMessages();
 
+    /// <summary>The rest of the on-screen text; replace members to localize or reword.</summary>
+    public PasskeyText Text { get; set; } = new PasskeyText();
+
+    /// <summary>How sign-in asks for an account, and which other paths the screens offer.</summary>
+    public PasskeyExperience Experience { get; set; } = new PasskeyExperience();
+
     /// <summary>
     /// Checks the configuration is coherent, including its features, branding and messages.
     /// </summary>
@@ -56,9 +62,19 @@ public sealed class PasskeyConfiguration
         {
             throw new ArgumentException("PasskeyConfiguration.Messages is required.");
         }
+        if (Text is null)
+        {
+            throw new ArgumentException("PasskeyConfiguration.Text is required.");
+        }
+        if (Experience is null)
+        {
+            throw new ArgumentException("PasskeyConfiguration.Experience is required.");
+        }
         Features.Validate();
         Branding.Validate();
         Messages.Validate();
+        Text.Validate();
+        Experience.Validate(Features);
     }
 }
 

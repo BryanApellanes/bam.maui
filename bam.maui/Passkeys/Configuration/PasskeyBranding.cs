@@ -49,6 +49,12 @@ public sealed class PasskeyBranding
     /// <summary>The text colour in the light scheme.</summary>
     public string TextColor { get; set; } = "#000000";
 
+    /// <summary>The colour of error headings and messages.</summary>
+    public string ErrorColor { get; set; } = "#B3261E";
+
+    /// <summary>The colour of error headings and messages in the dark scheme.</summary>
+    public string DarkErrorColor { get; set; } = "#F2B8B5";
+
     /// <summary>The page background in the dark scheme.</summary>
     public string DarkBackgroundColor { get; set; } = "#121212";
 
@@ -78,6 +84,8 @@ public sealed class PasskeyBranding
         RequireColor(TextColor, nameof(TextColor));
         RequireColor(DarkBackgroundColor, nameof(DarkBackgroundColor));
         RequireColor(DarkTextColor, nameof(DarkTextColor));
+        RequireColor(ErrorColor, nameof(ErrorColor));
+        RequireColor(DarkErrorColor, nameof(DarkErrorColor));
         if (CornerRadius < 0 || double.IsNaN(CornerRadius) || double.IsInfinity(CornerRadius))
         {
             throw new ArgumentException("PasskeyBranding.CornerRadius must be zero or a positive number.");

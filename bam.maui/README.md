@@ -8,18 +8,18 @@ Apps use it to register an account with a passkey, sign in (with or without a us
 
 - The operating system owns the ceremony: the biometric prompt, the credential picker, the key. These prompts can't be branded or re-skinned, and the library doesn't try.
 - The backend owns verification: it issues every challenge and decides whether a ceremony succeeded. The app never verifies a signature.
-- The library owns what's in between: orchestration, error handling, configuration, and (from Phase 4) the branded screens around the prompts.
+- The library owns what's in between: orchestration, error handling, configuration, and the branded screens around the prompts.
 
 ### Status
 
-Phases 1 to 3 of 7 are in place. Tracking issue: BryanApellanes/bam.maui#1.
+Phases 1 to 4 of 7 are in place. Tracking issue: BryanApellanes/bam.maui#1.
 
 | Phase | What | State |
 |---|---|---|
 | 1 | Contracts, configuration, orchestration, DI, unit tests | Done |
 | 2 | Native authenticators (Android, iOS, Mac Catalyst, Windows) | Done. Compiled and unit tested; no ceremony has been run on a device yet (see [Manual verification](#manual-verification)) |
 | 3 | HTTP backend for bam.useraccounts.web | Done. Tested against fake endpoints; not yet run against a live host |
-| 4 | White-label views and theming | Not started |
+| 4 | White-label views and theming | Done. View models, recovery and theme unit tested; the views compile for every target but haven't been rendered on a device yet |
 | 5 | Passkey management UI | Not started |
 | 6 | Older Android, platform matrix | Not started |
 | 7 | Hardening, docs, sample app | Not started |
@@ -231,9 +231,41 @@ Run these on each platform against a backend whose RP id matches the app's confi
 
 Known unknown these steps settle: whether the Apple sheet needs anything beyond the current view controller's window as its anchor. (Android errors are mapped by instance-of checks against the bound exception classes, not by class name or message.)
 
-### Branding
+### Screens
 
-`PasskeyBranding` holds the application name, logo, colours (hex strings), dark-scheme colours, corner radius, font family and theme mode. It's validated at registration and injectable. The views that read it arrive in Phase 4; nothing in the library hardcodes a brand.
+The library ships a sign-in screen and a registration screen. Each comes as a view (`PasskeySignInView`, `PasskeyRegistrationView`) to put in a page of your own, and as a ready-made page (`PasskeySignInPage`, `PasskeyRegistrationPage`). The system prompt itself is the operating system's and isn't styled; the screens are what's around it.
+
+```csharp
+builder.Services.AddBamPasskeys(registry, configuration);
+builder.Services.AddBamPasskeyUi(registry, new MyNavigator());   // after AddBamPasskeys
+```
+
+`IPasskeyNavigator` is how the screens leave a flow. The library assumes no navigation framework, so the app decides what each call does: `SignedInAsync(signIn, flow)` once the backend has verified a ceremony, `RegistrationRequestedAsync` and `SignInRequestedAsync` for the links between the two screens, and `AlternativeSignInRequestedAsync` for the app's other way in.
+
+- **Sign-in.** `PasskeyExperience.SignInMode` picks the layout: `UsernameLess` (one passkey button), `UsernameFirst` (a username field and Continue), or `Choice` (both, the default). With `EnableUsernameLessAuthentication` off, the screen is always username-first. The page checks the device each time it appears; a device that can't do passkeys gets the unavailable or device-setup screen, and the sign-in buttons stay off.
+- **Registration.** What a passkey is and why to use one, the username and name fields, and optional email and invite code fields (`AskForEmail`, `AskForInviteCode`). Only the fields the screen shows are sent. The success screen shows only after the backend has verified the new credential; its Continue button calls `SignedInAsync`.
+- **Progress.** While the system prompt is up the screen shows the working text and a Cancel button, which cancels the ceremony.
+- **Errors.** `PasskeyRecovery.For(error, flow, configuration)` decides what a failure screen shows. It's one pure function, so every category's screen is decided in one place:
+
+| Failure | Heading | Ways out |
+|---|---|---|
+| `UserCancelled` | None: the form stays, with a short note | |
+| `UnsupportedOperatingSystem`, `FeatureDisabled` | Unavailable | |
+| `MissingCredentialProvider`, `DeviceSecurityNotConfigured` | Device setup, with a hint | Try again |
+| `NetworkFailure` | Offline | Try again |
+| `CredentialAlreadyRegistered` | Couldn't create the passkey | Sign in instead |
+| `NoCredentials` when signing in | Couldn't sign in | Try again, create an account |
+| Anything else | Couldn't sign in / create the passkey | Try again |
+
+Registration failures also offer "sign in instead" when authentication is on (except on a device that can't do passkeys). Every failure screen offers the app's other way in when `AlternativeSignInLabel` is set.
+
+**Wording.** `PasskeyText` holds every string the screens show. `{0}` in a heading is the app name. Replace members to reword or translate; each must have text. Error messages still come from `PasskeyMessages`.
+
+**Branding.** `PasskeyBranding` holds the application name, logo, colours (hex strings), dark-scheme colours, corner radius, font family and theme mode. It's validated at registration, and nothing in the library hardcodes a brand. `PasskeyTheme` turns it into a `ResourceDictionary` that every screen merges, under the `PasskeyResourceKeys` names (`Passkey.Primary`, `Passkey.Background`, `Passkey.Text` and so on). Change an entry to restyle every screen. Text on the primary colour is black or white, whichever has the higher WCAG contrast. `ThemeMode` `System` follows the device's light or dark setting as it changes; `Light` and `Dark` fix it.
+
+**Layout and accessibility.** On a narrow window the brand sits above the content in one column of readable width; from 840 wide it sits beside it. Headings, fields, buttons, the logo and the progress spinner carry semantic descriptions for screen readers.
+
+The screens' view models (`PasskeySignInViewModel`, `PasskeyRegistrationViewModel`) are public, so an app that wants its own layout can bind its own XAML to them and keep the flow, the recovery and the navigation.
 
 ### Security
 
@@ -259,7 +291,7 @@ dotnet build bam.maui.tests/bam.maui.tests.csproj -c Release
 BAM_ARG_STYLE=Posix dotnet run --project bam.maui.tests/bam.maui.tests.csproj -c Release --no-build -- --ut
 ```
 
-Suites: `pkcf` configuration, branding, capabilities and what the models print; `pken` error normalization; `pkcl` client orchestration, cancellation, feature switches and management; `pkdg` where a cancellation came from, and what reaches the log; `pkrg` registration; `pkwj` reading options and writing response JSON; `pkwn` the Windows authenticator and its interop layout; `pkpe` the Android, Apple and Windows error maps; `pkpc` a callback ceremony ending from the caller's token; `pkhb` the HTTP backend against fake account endpoints.
+Suites: `pkcf` configuration, branding, capabilities and what the models print; `pken` error normalization; `pkcl` client orchestration, cancellation, feature switches and management; `pkdg` where a cancellation came from, and what reaches the log; `pkrg` registering the client and the screens in a registry; `pkwj` reading options and writing response JSON; `pkwn` the Windows authenticator and its interop layout; `pkpe` the Android, Apple and Windows error maps; `pkpc` a callback ceremony ending from the caller's token; `pkhb` the HTTP backend against fake account endpoints; `pkrc` the recovery plan for every error category; `pksi` the sign-in screen's view model; `pkrv` the registration screen's view model; `pkth` the theme. The screen tests drive the view models, not rendered views.
 
 ### Dependencies
 

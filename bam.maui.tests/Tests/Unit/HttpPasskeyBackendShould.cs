@@ -487,13 +487,28 @@ public class HttpPasskeyBackendShould : UnitTestMenuContainer
             using HttpPasskeyBackend during = Backend(dropped);
             PasskeyException? body = Caught(() => during.GetPasskeysAsync());
 
+            // The caller cancels while the body is read, and the stream reports it as an IOException.
+            FakeAccountEndpoints aborted = new FakeAccountEndpoints().Respond(new FakeResponse { IoErrorOnCancel = true });
+            using HttpPasskeyBackend cancelling = Backend(aborted, new PasskeyHttpBackendOptions { Timeout = TimeSpan.FromMinutes(5) });
+            using CancellationTokenSource caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+            string afterCancel = "nothing";
+            try
+            {
+                cancelling.GetPasskeysAsync(caller.Token).GetAwaiter().GetResult();
+            }
+            catch (Exception exception)
+            {
+                afterCancel = exception is OperationCanceledException ? "cancelled" : exception.GetType().Name;
+            }
+
             return new DroppedOutcome(
                 send?.Category,
                 send?.InnerException is HttpRequestException,
                 send?.Message.Contains("accounts.internal", StringComparison.Ordinal) ?? false,
                 body?.Category,
                 body?.InnerException is HttpIOException,
-                body?.Message.Contains("10.0.0.7", StringComparison.Ordinal) ?? false);
+                body?.Message.Contains("10.0.0.7", StringComparison.Ordinal) ?? false,
+                afterCancel);
         })
         .TheTest
         .ShouldPass<DroppedOutcome>((because, outcome) =>
@@ -504,6 +519,7 @@ public class HttpPasskeyBackendShould : UnitTestMenuContainer
             because.ItsTrue("a connection dropped mid-body is a network failure, got " + outcome.Body, outcome.Body == PasskeyErrorCategory.NetworkFailure);
             because.ItsTrue("which keeps the HttpIOException inside", outcome.BodyInner);
             because.ItsTrue("but does not quote it", !outcome.BodyQuoted);
+            because.ItsTrue("an IOException after the caller cancelled is a cancellation, got " + outcome.AfterCancel, outcome.AfterCancel == "cancelled");
         })
         .SoBeHappy()
         .UnlessItFailed();
@@ -590,7 +606,7 @@ public class HttpPasskeyBackendShould : UnitTestMenuContainer
 
     private sealed record CodeOutcome(PasskeyErrorCategory? Category, string? Code, bool AppMessage, string NewMessages, bool Bound, bool KeptExisting);
 
-    private sealed record DroppedOutcome(PasskeyErrorCategory? Send, bool SendInner, bool SendQuoted, PasskeyErrorCategory? Body, bool BodyInner, bool BodyQuoted);
+    private sealed record DroppedOutcome(PasskeyErrorCategory? Send, bool SendInner, bool SendQuoted, PasskeyErrorCategory? Body, bool BodyInner, bool BodyQuoted, string AfterCancel);
 
     private sealed record StallOutcome(PasskeyErrorCategory? OwnClient, PasskeyErrorCategory? HostClient, long ElapsedMilliseconds, string CallerCancel, bool FollowsRedirects, bool UsesCookies);
 }

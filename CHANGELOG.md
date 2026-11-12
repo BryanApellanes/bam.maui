@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Phase 4: white-label screens (bam.maui#10)
+
+Added
+- `PasskeySignInView` and `PasskeyRegistrationView`, with ready-made `PasskeySignInPage` and `PasskeyRegistrationPage`, built in C# on a shared `PasskeyScreenLayout` (brand and content, one column on narrow windows, side by side from 840 wide) and `PasskeyStatusView` (progress, cancel, and the failure screen).
+- `PasskeySignInViewModel` and `PasskeyRegistrationViewModel` over `IPasskeyClient`, sharing `PasskeyFlowViewModel` (`Ready`, `Working`, `Succeeded`, `Failed`, cancel and try again) and `PasskeyCommand`.
+- `PasskeyRecovery`, which maps a failed ceremony to a heading, the message, a hint and the ways out (`PasskeyRecoveryPlan`, `PasskeyRecoveryAction`). A cancellation is quiet: the form stays and shows a note.
+- `IPasskeyNavigator`, the app's side of leaving a flow.
+- `PasskeyTheme` and `PasskeyResourceKeys`: the brand as a `ResourceDictionary`, light and dark, following the device when `ThemeMode` is `System`, with black or white text on the primary colour by WCAG contrast.
+- `PasskeyText` (every on-screen string, validated) and `PasskeyExperience` (`SignInMode`, `AlternativeSignInLabel`, `OfferRegistration`, `AskForEmail`, `AskForInviteCode`), both on `PasskeyConfiguration`.
+- `AddPasskeyUi` and `AddBamPasskeyUi`.
+- 17 unit tests (65 in all): suites `pkrc`, `pksi`, `pkrv`, `pkth`, plus screen-text and screen-registration tests in `pkcf` and `pkrg`.
+
+Fixed (nit from the bam.maui#9 review)
+- A transport failure while the caller's own token is cancelled is reported as a cancellation, not `NetworkFailure`. Some handlers fail the body read with an `IOException` instead of an `OperationCanceledException` when the request is aborted.
+
+Decisions
+- Views are built in C#, not XAML, so the library has no XAML compilation step in any target.
+- The flow, recovery and navigation live in view models that don't touch MAUI controls, so they are tested without a device. An app can bind its own XAML to them.
+- The library assumes no navigation framework. `IPasskeyNavigator` lets Shell, `NavigationPage` and `Window.Page` apps each do their own thing.
+- Registration success is shown only after the backend's complete call returns; the success screen's Continue is what calls `SignedInAsync`.
+- The profile step (`POST /account/profile` when `profileCreated` is false, bam.useraccounts#22) is left to Phase 5 with account management. `profileCreated` isn't on the `IPasskeyBackend` seam yet.
+
+Outstanding
+- The views compile for every target but haven't been rendered on a device. The view-model tests cover what the screens do.
+- Screen-reader and dynamic-type behaviour need checking on each platform.
+
 ### Builds without the MAUI workload (bam.maui#12)
 
 Changed

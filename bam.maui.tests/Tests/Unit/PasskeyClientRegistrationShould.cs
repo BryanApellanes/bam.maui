@@ -147,6 +147,65 @@ public class PasskeyClientRegistrationShould : UnitTestMenuContainer
         .UnlessItFailed();
     }
 
+    [UnitTest]
+    public void BindTheScreensOnTheRegistry()
+    {
+        After.Setup(reg => reg.Set(new CallLog()))
+        .When<CallLog>("adds the screens before and after the client, and with a null navigator", (log, reg) =>
+        {
+            ServiceRegistry bare = new ServiceRegistry();
+            string? withoutClient = null;
+            try
+            {
+                bare.AddPasskeyUi(new FakePasskeyNavigator());
+            }
+            catch (InvalidOperationException refused)
+            {
+                withoutClient = refused.Message;
+            }
+
+            ServiceRegistry registry = new ServiceRegistry();
+            registry.For<IPasskeyBackend>().Use(new FakePasskeyBackend(log));
+            registry.For<IPasskeyAuthenticator>().Use(new FakePasskeyAuthenticator(log));
+            PasskeyConfiguration configuration = PasskeyClientFixture.ValidConfiguration();
+            registry.AddPasskeyClient(configuration);
+            bool nullNavigatorRefused = false;
+            try
+            {
+                registry.AddPasskeyUi(null!);
+            }
+            catch (ArgumentNullException)
+            {
+                nullNavigatorRefused = true;
+            }
+            FakePasskeyNavigator navigator = new FakePasskeyNavigator();
+            registry.AddPasskeyUi(navigator);
+            PasskeySignInViewModel signIn = registry.Get<PasskeySignInViewModel>();
+            PasskeySignInViewModel secondSignIn = registry.Get<PasskeySignInViewModel>();
+            PasskeyRegistrationViewModel registration = registry.Get<PasskeyRegistrationViewModel>();
+            signIn.SignInCommand.ExecuteAsync().GetAwaiter().GetResult();
+            return new ScreensOutcome(withoutClient, nullNavigatorRefused, ReferenceEquals(registry.Get<PasskeyTheme>(), registry.Get<PasskeyTheme>()),
+                !ReferenceEquals(signIn, secondSignIn), ReferenceEquals(signIn.Configuration, configuration), ReferenceEquals(registration.Configuration, configuration),
+                navigator.Joined, ReferenceEquals(registry.Get<IPasskeyNavigator>(), navigator));
+        })
+        .TheTest
+        .ShouldPass<ScreensOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("the screens need the client first: " + outcome.WithoutClient, outcome.WithoutClient is not null && outcome.WithoutClient.Contains("AddPasskeyClient", StringComparison.Ordinal));
+            because.ItsTrue("a null navigator is refused", outcome.NullNavigatorRefused);
+            because.ItsTrue("one theme is shared", outcome.SharedTheme);
+            because.ItsTrue("each screen gets its own view model", outcome.FreshViewModels);
+            because.ItsTrue("the view models read the host's configuration", outcome.SignInConfiguration && outcome.RegistrationConfiguration);
+            because.ItsTrue("a sign-in through the bound client reaches the host's navigator: " + outcome.NavigatorCalls, outcome.NavigatorCalls == "signedIn");
+            because.ItsTrue("the navigator is the host's", outcome.SameNavigator);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    private sealed record ScreensOutcome(string? WithoutClient, bool NullNavigatorRefused, bool SharedTheme, bool FreshViewModels, bool SignInConfiguration, bool RegistrationConfiguration,
+        string NavigatorCalls, bool SameNavigator);
+
     private sealed record BindingOutcome(bool ClientResolved, bool SameConfiguration, bool DefaultAuthenticator, bool NormalizerResolved, PasskeyErrorCategory? SignInCategory, int BackendCalls);
 
     private sealed record HostBindingOutcome(bool KeptHostAuthenticator, bool SignedInBefore, bool SignedInAfter);
