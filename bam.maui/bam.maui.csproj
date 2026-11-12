@@ -4,19 +4,25 @@
 		<!-- The plain net10.0 target carries the passkey contracts and orchestration so they build and test without a device. -->
 		<TargetFrameworks>net10.0</TargetFrameworks>
 		<!-- bamtk.sln is built into one output folder (run-tests.sh), where several targets of one project would overwrite
-		     each other, so inside that solution only net10.0 is built.  bamtest sets BamPlatformTargets=false for the test
-		     projects it builds, which turns the platform targets off the same way.  Building this project directly or from an
-		     app solution builds every target.  -p:BamMauiPlatformTargets=true|false overrides all of these. -->
-		<BamMauiPlatformTargets Condition="'$(BamMauiPlatformTargets)' == '' And '$(BamPlatformTargets)' == 'false'">false</BamMauiPlatformTargets>
+		     each other, so inside that solution only net10.0 is built.  -p:BamPlatformTargets=false turns the platform targets
+		     off the same way; bamtest passes it to the test projects it builds (bamtest#3).  It is a property, not an
+		     environment variable: MSBuild would hand an exported variable to every build in that shell, including an app's,
+		     which would then get the net10.0 build and no native authenticator.  So a BamPlatformTargets found in the
+		     environment is ignored, with warning BAMMAUI001.  Building this project directly or from an app solution builds
+		     every target.  -p:BamMauiPlatformTargets=true|false overrides all of these. -->
+		<BamPlatformTargetsInEnvironment>$([System.Environment]::GetEnvironmentVariable('BamPlatformTargets'))</BamPlatformTargetsInEnvironment>
+		<BamMauiPlatformTargets Condition="'$(BamMauiPlatformTargets)' == '' And '$(BamPlatformTargetsInEnvironment)' == '' And '$(BamPlatformTargets)' == 'false'">false</BamMauiPlatformTargets>
 		<BamMauiPlatformTargets Condition="'$(BamMauiPlatformTargets)' == '' And '$(SolutionFileName)' == 'bamtk.sln'">false</BamMauiPlatformTargets>
 		<BamMauiPlatformTargets Condition="'$(BamMauiPlatformTargets)' == ''">true</BamMauiPlatformTargets>
 		<!-- The Apple and Android workloads do not restore on Linux, so platform targets are added everywhere else. -->
 		<TargetFrameworks Condition="'$(BamMauiPlatformTargets)' == 'true' And !$([MSBuild]::IsOSPlatform('linux'))">$(TargetFrameworks);net10.0-android;net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
 		<TargetFrameworks Condition="'$(BamMauiPlatformTargets)' == 'true' And $([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
-		<!-- UseMaui needs the MAUI workload even for net10.0, so a net10.0-only build goes without it: a machine with just the
-		     .NET SDK can then restore and build bamtk.sln.  The Microsoft.Maui.Controls package is all net10.0 needs. -->
-		<UseMaui Condition="'$(BamMauiPlatformTargets)' == 'true'">true</UseMaui>
-		<SingleProject Condition="'$(BamMauiPlatformTargets)' == 'true'">true</SingleProject>
+		<!-- UseMaui needs the MAUI workload even for net10.0, so it is set only when a platform target is in the list.  A
+		     net10.0-only build (inside bamtk.sln, with -p:BamPlatformTargets=false, or any build on Linux) then restores on
+		     a machine with just the .NET SDK.  The Microsoft.Maui.Controls package is all net10.0 needs, and it brings the
+		     MAUI global usings itself. -->
+		<UseMaui Condition="$(TargetFrameworks.Contains('-'))">true</UseMaui>
+		<SingleProject Condition="$(TargetFrameworks.Contains('-'))">true</SingleProject>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<RootNamespace>Bam.Maui</RootNamespace>
@@ -29,20 +35,15 @@
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
 	</PropertyGroup>
 
-	<!-- The usings UseMaui would add, for a build without it. -->
-	<ItemGroup Condition="'$(UseMaui)' != 'true'">
-		<Using Include="Microsoft.Maui" />
-		<Using Include="Microsoft.Maui.Controls" />
-		<Using Include="Microsoft.Maui.Graphics" />
-		<Using Include="Microsoft.Maui.ApplicationModel" />
-		<Using Include="Microsoft.Maui.Devices" />
-	</ItemGroup>
-
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="10.0.20" />
 		<!-- Android Credential Manager.  Microsoft's binding of androidx.credentials; bamtk has no equivalent. -->
 		<PackageReference Include="Xamarin.AndroidX.Credentials" Version="1.5.0.3" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'" />
 	</ItemGroup>
+
+	<Target Name="BamMauiWarnPlatformTargetsInEnvironment" BeforeTargets="Build" Condition="'$(BamPlatformTargetsInEnvironment)' != ''">
+		<Warning Code="BAMMAUI001" Text="BamPlatformTargets is set in the environment ('$(BamPlatformTargetsInEnvironment)') and is ignored: bam.maui builds its platform targets as usual. Pass -p:BamPlatformTargets=false to build net10.0 only." />
+	</Target>
 
 	<PropertyGroup>
 		<BamTargetPlatform>$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)'))</BamTargetPlatform>
