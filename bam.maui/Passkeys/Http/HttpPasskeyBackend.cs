@@ -34,6 +34,7 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
 
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
+    private readonly PasskeySessionCookieJar? _cookieJar;
     private readonly Uri _accountEndpoint;
     private readonly int _maxResponseBytes;
     private readonly TimeSpan _timeout;
@@ -44,18 +45,20 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
     /// <c>AllowAutoRedirect = false</c>: this backend refuses a redirect response, but a client that follows
     /// redirects never shows it one.  <see cref="Create(PasskeyConfiguration, PasskeyHttpBackendOptions?)"/> builds a
     /// client that does both.  <see cref="PasskeyHttpBackendOptions.Timeout"/> bounds each whole exchange, body
-    /// included, whatever the client's own timeout.  The client is not disposed with the backend.
+    /// included, whatever the client's own timeout.  The client is not disposed with the backend, and its cookies are
+    /// the host's: after a sign-out, or a removal that ended the session (<see cref="PasskeySignOut.SignedOut"/>), the
+    /// host should drop the session cookie itself.  A backend from <c>Create</c> does that on its own.
     /// </summary>
     /// <param name="httpClient">The client to send with.</param>
     /// <param name="configuration">The app's passkey configuration; validated here.</param>
     /// <param name="options">Where the endpoints are; null for the defaults.</param>
     /// <exception cref="ArgumentException">The configuration or an option is invalid.</exception>
     public HttpPasskeyBackend(HttpClient httpClient, PasskeyConfiguration configuration, PasskeyHttpBackendOptions? options = null)
-        : this(httpClient, configuration, options, false)
+        : this(httpClient, configuration, options, null)
     {
     }
 
-    private HttpPasskeyBackend(HttpClient httpClient, PasskeyConfiguration configuration, PasskeyHttpBackendOptions? options, bool ownsHttpClient)
+    private HttpPasskeyBackend(HttpClient httpClient, PasskeyConfiguration configuration, PasskeyHttpBackendOptions? options, PasskeySessionCookieJar? ownedCookieJar)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -65,7 +68,8 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         _maxResponseBytes = resolved.MaxResponseBytes;
         _timeout = resolved.Timeout;
         _httpClient = httpClient;
-        _ownsHttpClient = ownsHttpClient;
+        _ownsHttpClient = ownedCookieJar is not null;
+        _cookieJar = ownedCookieJar;
     }
 
     /// <summary>The base the endpoint paths are resolved against, ending in <c>/</c>.</summary>
@@ -73,7 +77,8 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
 
     /// <summary>
     /// Creates a backend with its own client: the platform's handler with cookies and redirects
-    /// off, behind a cookie jar that keeps the session, and the configured timeout.
+    /// off, behind a cookie jar that keeps the session, and the configured timeout.  The jar is emptied when a sign-out
+    /// or a removal ends the session, so the old cookie is never sent again.
     /// </summary>
     /// <param name="configuration">The app's passkey configuration; validated here.</param>
     /// <param name="options">Where the endpoints are; null for the defaults.</param>
@@ -100,13 +105,14 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
     {
         ArgumentNullException.ThrowIfNull(transport);
         PasskeyHttpBackendOptions resolved = options ?? new PasskeyHttpBackendOptions();
-        HttpClient client = new HttpClient(new PasskeySessionCookieJar(transport), disposeHandler: true)
+        PasskeySessionCookieJar jar = new PasskeySessionCookieJar(transport);
+        HttpClient client = new HttpClient(jar, disposeHandler: true)
         {
             Timeout = resolved.Timeout
         };
         try
         {
-            return new HttpPasskeyBackend(client, configuration, resolved, true);
+            return new HttpPasskeyBackend(client, configuration, resolved, jar);
         }
         catch
         {
@@ -147,12 +153,24 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task CompleteAdditionalRegistrationAsync(WebAuthnRegistrationResponse response, CancellationToken cancellationToken = default)
+    public async Task<string> CompleteAdditionalRegistrationAsync(WebAuthnRegistrationResponse response, string? name = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(response);
-        byte[] body = Body(writer => WriteCredential(writer, response.Json));
+        byte[] body = Body(writer =>
+        {
+            WriteCredential(writer, response.Json);
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                writer.WriteString("name", name);
+            }
+        });
         JsonElement root = await SendAsync(HttpMethod.Post, Routes.AdditionalComplete, Routes.AdditionalComplete, body, cancellationToken).ConfigureAwait(false);
-        RequiredString(root, "credentialId", Routes.AdditionalComplete, MaxCredentialIdLength);
+        string credentialId = RequiredString(root, "credentialId", Routes.AdditionalComplete, MaxCredentialIdLength);
+        if (!IsBase64Url(credentialId))
+        {
+            throw Invalid(Routes.AdditionalComplete, "has an unusable credentialId");
+        }
+        return credentialId;
     }
 
     /// <inheritdoc />
@@ -215,20 +233,76 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
                 CredentialId = RequiredString(passkey, "id", Routes.Passkeys, MaxCredentialIdLength),
                 Name = OptionalString(passkey, "name", Routes.Passkeys),
                 CreatedUtc = OptionalDate(passkey, "createdUtc", Routes.Passkeys),
-                LastUsedUtc = OptionalDate(passkey, "lastUsedUtc", Routes.Passkeys)
+                LastUsedUtc = OptionalDate(passkey, "lastUsedUtc", Routes.Passkeys),
+                IsCurrent = OptionalBool(passkey, "current", Routes.Passkeys),
+                IsRegisteredKeySet = OptionalBool(passkey, "registeredKeySet", Routes.Passkeys)
             });
         }
         return credentials;
     }
 
     /// <inheritdoc />
-    public async Task DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
+    public async Task<PasskeySignOut> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
     {
-        if (!IsBase64Url(credentialId))
+        RequireSendable(credentialId);
+        JsonElement root = await SendAsync(HttpMethod.Delete, Routes.Passkeys + "/" + credentialId, Routes.PasskeyById, null, cancellationToken).ConfigureAwait(false);
+        PasskeySignOut signOut = ReadSignOut(root, Routes.PasskeyById);
+        if (signOut.SignedOut)
         {
-            throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "The credential id is not base64url, so it was not sent.");
+            _cookieJar?.Clear();
         }
-        await SendAsync(HttpMethod.Delete, Routes.Passkeys + "/" + credentialId, Routes.PasskeyById, null, cancellationToken).ConfigureAwait(false);
+        return signOut;
+    }
+
+    /// <inheritdoc />
+    public async Task RenamePasskeyAsync(string credentialId, string? name, CancellationToken cancellationToken = default)
+    {
+        RequireSendable(credentialId);
+        byte[] body = Body(writer =>
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                writer.WriteNull("name");
+            }
+            else
+            {
+                writer.WriteString("name", name);
+            }
+        });
+        await SendAsync(HttpMethod.Post, Routes.Passkeys + "/" + credentialId + "/name", Routes.PasskeyName, body, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<PasskeySignOut> SignOutAsync(CancellationToken cancellationToken = default)
+    {
+        byte[] body = Body(_ => { });
+        try
+        {
+            JsonElement root = await SendAsync(HttpMethod.Post, Routes.SignOut, Routes.SignOut, body, cancellationToken).ConfigureAwait(false);
+            return ReadSignOut(root, Routes.SignOut);
+        }
+        finally
+        {
+            // The person asked to leave: whatever the server says, or if it never answered, this client stops sending
+            // the cookie.  A server that never got the request keeps the session until it expires, but this device no
+            // longer holds it.
+            _cookieJar?.Clear();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task SaveProfileAsync(PasskeyProfile profile, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        byte[] body = Body(writer =>
+        {
+            writer.WriteString("displayName", profile.DisplayName);
+            if (!string.IsNullOrWhiteSpace(profile.Email))
+            {
+                writer.WriteString("email", profile.Email);
+            }
+        });
+        await SendAsync(HttpMethod.Post, Routes.Profile, Routes.Profile, body, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Releases the client when the backend created it.</summary>
@@ -271,6 +345,9 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
             case BackendCodes.SignUpClosed:
             case BackendCodes.PasskeyNotAdded:
                 return PasskeyErrorCategory.ServerVerificationFailed;
+            case BackendCodes.ProfileNotSaved:
+                // The server couldn't store it: nothing the person sent was wrong, and nothing failed verification.
+                return PasskeyErrorCategory.Unknown;
         }
         return code switch
         {
@@ -471,7 +548,44 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         {
             Handle = RequiredString(root, "handle", route, 256),
             DisplayName = OptionalString(root, "displayName", route),
+            NextUrl = SitePathOrNull(OptionalString(root, "nextUrl", route)),
+            ProfileCreated = OptionalBool(root, "profileCreated", route) ?? true
+        };
+    }
+
+    private static PasskeySignOut ReadSignOut(JsonElement root, string route)
+    {
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("signedOut", out JsonElement signedOut)
+            || (signedOut.ValueKind != JsonValueKind.True && signedOut.ValueKind != JsonValueKind.False))
+        {
+            throw Invalid(route, "has no signedOut");
+        }
+        return new PasskeySignOut
+        {
+            SignedOut = signedOut.GetBoolean(),
             NextUrl = SitePathOrNull(OptionalString(root, "nextUrl", route))
+        };
+    }
+
+    private static void RequireSendable(string credentialId)
+    {
+        if (!IsBase64Url(credentialId))
+        {
+            throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "The credential id is not base64url, so it was not sent.");
+        }
+    }
+
+    private static bool? OptionalBool(JsonElement root, string name, string route)
+    {
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty(name, out JsonElement value) || value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => throw Invalid(route, "has a " + name + " that is not true or false")
         };
     }
 
@@ -583,6 +697,9 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         internal const string AssertionComplete = "passkey/assertion/complete";
         internal const string Passkeys = "passkeys";
         internal const string PasskeyById = "passkeys/{id}";
+        internal const string PasskeyName = "passkeys/{id}/name";
+        internal const string SignOut = "signout";
+        internal const string Profile = "profile";
     }
 
     /// <summary>The <c>AccountErrorCodes</c> of the account endpoints, as they appear on the wire.</summary>
@@ -602,5 +719,6 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         internal const string NotFound = "NotFound";
         internal const string LastPasskey = "LastPasskey";
         internal const string RateLimited = "RateLimited";
+        internal const string ProfileNotSaved = "ProfileNotSaved";
     }
 }

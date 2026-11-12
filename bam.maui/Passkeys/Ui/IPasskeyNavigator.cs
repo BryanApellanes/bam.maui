@@ -24,4 +24,12 @@ public interface IPasskeyNavigator
     /// <summary>The user wants to sign in to an existing account.  Show the sign-in screen.</summary>
     /// <returns>A task that completes when navigation is done.</returns>
     Task SignInRequestedAsync();
+
+    /// <summary>
+    /// The session ended: the user signed out, or removed the passkey this session was opened with.  Move to the
+    /// signed-out part of the app.  Without an override this shows the sign-in screen.
+    /// </summary>
+    /// <param name="signOut">What the backend said; <see cref="PasskeySignOut.NextUrl"/> is a path on the relying party's site or null.</param>
+    /// <returns>A task that completes when navigation is done.</returns>
+    Task SignedOutAsync(PasskeySignOut signOut) => SignInRequestedAsync();
 }

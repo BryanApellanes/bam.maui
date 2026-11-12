@@ -5,7 +5,8 @@ namespace Bam.Maui.Passkeys;
 /// <summary>
 /// The sign-in screen: the passkey button, the username field the <see cref="PasskeySignInMode"/> asks for,
 /// the app's other way to sign in, and the link to registration.  A verified sign-in goes straight to
-/// <see cref="IPasskeyNavigator.SignedInAsync"/>.
+/// <see cref="IPasskeyNavigator.SignedInAsync"/>; while that runs the screen shows <see cref="SignedInTitle"/> and
+/// <see cref="SigningInText"/>, never a blank page.
 /// </summary>
 public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
 {
@@ -36,6 +37,12 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
 
     /// <summary>The line under the heading.</summary>
     public string Welcome => Text.Welcome;
+
+    /// <summary>The heading shown while the app takes over after sign-in, with the app name.</summary>
+    public string SignedInTitle => PasskeyText.WithName(Text.SignedInTitle, ApplicationName);
+
+    /// <summary>The line under <see cref="SignedInTitle"/>.</summary>
+    public string SigningInText => Text.SigningIn;
 
     /// <summary>Whether the username-less passkey button shows.</summary>
     public bool ShowsPasskeyButton => Mode != PasskeySignInMode.UsernameFirst;

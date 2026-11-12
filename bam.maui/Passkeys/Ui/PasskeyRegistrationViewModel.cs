@@ -6,6 +6,11 @@ namespace Bam.Maui.Passkeys;
 /// The registration screen: what a passkey is and why to use one, the sign-up fields, and the create button.
 /// Success is shown only after the backend has verified the new credential; the success screen's
 /// <see cref="DoneCommand"/> then calls <see cref="IPasskeyNavigator.SignedInAsync"/>, and the screen is cleared for the next account.
+/// <para>
+/// When the backend created the account but couldn't write its profile (<see cref="PasskeySignIn.ProfileCreated"/>
+/// false), the success screen also offers to save the name and email typed at sign-up (<see cref="SaveProfileCommand"/>).
+/// Done stays available: the app then receives <c>ProfileCreated = false</c> and can ask later.
+/// </para>
 /// </summary>
 public sealed class PasskeyRegistrationViewModel : PasskeyFlowViewModel
 {
@@ -24,7 +29,8 @@ public sealed class PasskeyRegistrationViewModel : PasskeyFlowViewModel
         : base(client, configuration, navigator, logger)
     {
         CreateCommand = new PasskeyCommand(CreateAsync, () => State != PasskeyViewState.Working && !string.IsNullOrWhiteSpace(Handle) && !string.IsNullOrWhiteSpace(DisplayName));
-        DoneCommand = new PasskeyCommand(DoneAsync, () => _signIn is not null);
+        DoneCommand = new PasskeyCommand(DoneAsync, () => _signIn is not null && State == PasskeyViewState.Succeeded);
+        SaveProfileCommand = new PasskeyCommand(SaveProfileAsync, () => NeedsProfile && State == PasskeyViewState.Succeeded && !string.IsNullOrWhiteSpace(DisplayName));
     }
 
     /// <inheritdoc />
@@ -44,6 +50,15 @@ public sealed class PasskeyRegistrationViewModel : PasskeyFlowViewModel
 
     /// <summary>The line under the success heading.</summary>
     public string SuccessDetail => Text.RegisteredDetail;
+
+    /// <summary>Whether the account was created without its profile, and saving it is still offered.</summary>
+    public bool NeedsProfile => _signIn is { ProfileCreated: false };
+
+    /// <summary>Whether the success screen shows the profile panel.</summary>
+    public bool ShowsProfileStep => HasSucceeded && NeedsProfile;
+
+    /// <summary>The profile panel's line.</summary>
+    public string ProfileMessage => Text.ProfileNotSavedMessage;
 
     /// <summary>Whether the email field shows.</summary>
     public bool AsksForEmail => Configuration.Experience.AskForEmail;
@@ -76,6 +91,7 @@ public sealed class PasskeyRegistrationViewModel : PasskeyFlowViewModel
             if (Set(ref _displayName, value ?? string.Empty))
             {
                 CreateCommand.RaiseCanExecuteChanged();
+                SaveProfileCommand?.RaiseCanExecuteChanged();
             }
         }
     }
@@ -100,6 +116,9 @@ public sealed class PasskeyRegistrationViewModel : PasskeyFlowViewModel
     /// <summary>Leaves the success screen for the signed-in app.</summary>
     public PasskeyCommand DoneCommand { get; }
 
+    /// <summary>Saves the name and email (as typed at sign-up, or changed on the success screen) when sign-up couldn't.</summary>
+    public PasskeyCommand SaveProfileCommand { get; }
+
     /// <summary>Back from a failed "done" is the success screen again: the account exists.</summary>
     protected override PasskeyViewState DismissedState => _signIn is null ? PasskeyViewState.Ready : PasskeyViewState.Succeeded;
 
@@ -109,6 +128,13 @@ public sealed class PasskeyRegistrationViewModel : PasskeyFlowViewModel
         base.RaiseCommands();
         CreateCommand?.RaiseCanExecuteChanged();
         DoneCommand?.RaiseCanExecuteChanged();
+        SaveProfileCommand?.RaiseCanExecuteChanged();
+    }
+
+    /// <inheritdoc />
+    protected override void OnStateChanged()
+    {
+        OnPropertyChanged(nameof(ShowsProfileStep));
     }
 
     private Task CreateAsync()
@@ -123,10 +149,41 @@ public sealed class PasskeyRegistrationViewModel : PasskeyFlowViewModel
         };
         return RunAsync(token => Client.RegisterPasskeyAsync(request, token), signIn =>
         {
-            _signIn = signIn;
-            DoneCommand.RaiseCanExecuteChanged();
+            SetSignIn(signIn);
             return Task.CompletedTask;
         }, typedInput: true);
+    }
+
+    private Task SaveProfileAsync()
+    {
+        PasskeySignIn? signIn = _signIn;
+        if (signIn is null || signIn.ProfileCreated)
+        {
+            return Task.CompletedTask;
+        }
+        PasskeyProfile profile = new PasskeyProfile
+        {
+            DisplayName = DisplayName.Trim(),
+            Email = AsksForEmail ? NullIfBlank(Email) : null
+        };
+        // A refusal (an email the host requires) goes Back to the success screen with the fields kept.
+        return RunAsync(async token =>
+        {
+            PasskeyResult saved = await Client.SaveProfileAsync(profile, token);
+            return saved.Error is null ? PasskeyResult<bool>.Success(true) : PasskeyResult<bool>.Failure(saved.Error);
+        }, _ =>
+        {
+            SetSignIn(signIn with { ProfileCreated = true, DisplayName = profile.DisplayName });
+            return Task.CompletedTask;
+        }, typedInput: true, flow: PasskeyFlow.Profile, workingText: Text.Updating);
+    }
+
+    private void SetSignIn(PasskeySignIn? signIn)
+    {
+        _signIn = signIn;
+        OnPropertyChanged(nameof(NeedsProfile));
+        OnPropertyChanged(nameof(ShowsProfileStep));
+        RaiseCommands();
     }
 
     private Task DoneAsync()
@@ -146,7 +203,7 @@ public sealed class PasskeyRegistrationViewModel : PasskeyFlowViewModel
     // The account is handed over: nothing of it stays on a screen the app may show again.
     private void Clear()
     {
-        _signIn = null;
+        SetSignIn(null);
         Handle = string.Empty;
         DisplayName = string.Empty;
         Email = string.Empty;

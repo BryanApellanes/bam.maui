@@ -57,10 +57,25 @@ public sealed class PasskeySignInView : PasskeyScreenLayout
         }
         PasskeyViewParts.ShowWhen(form, nameof(PasskeyFlowViewModel.IsReady));
 
+        // While the app's SignedInAsync runs (loading the account, pushing a page) the screen says what is happening.
+        ActivityIndicator spinner = new ActivityIndicator { IsRunning = true, HeightRequest = 32 };
+        spinner.SetDynamicResource(ActivityIndicator.ColorProperty, PasskeyResourceKeys.Primary);
+        VerticalStackLayout signedIn = new VerticalStackLayout
+        {
+            Spacing = 16,
+            Children =
+            {
+                PasskeyViewParts.Heading(nameof(PasskeySignInViewModel.SignedInTitle)),
+                PasskeyViewParts.Body(nameof(PasskeySignInViewModel.SigningInText)),
+                spinner
+            }
+        };
+        PasskeyViewParts.ShowWhen(signedIn, nameof(PasskeyFlowViewModel.HasSucceeded));
+
         return new VerticalStackLayout
         {
             Spacing = 0,
-            Children = { form, new PasskeyStatusView(text, viewModel.Configuration.Experience.AlternativeSignInLabel) }
+            Children = { form, signedIn, new PasskeyStatusView(text, viewModel.Configuration.Experience.AlternativeSignInLabel) }
         };
     }
 }

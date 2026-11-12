@@ -168,6 +168,39 @@ public class PasskeyRecoveryShould : UnitTestMenuContainer
     }
 
     [UnitTest]
+    public void SendAnEndedSessionToSignIn()
+    {
+        After.Setup(reg => reg.Set(PasskeyClientFixture.ValidConfiguration()))
+        .When<PasskeyConfiguration>("plans a lost session in each flow, with passkey sign-in on and off, and in place of the list", (configuration, reg) =>
+        {
+            PasskeyConfiguration noSignIn = PasskeyClientFixture.ValidConfiguration();
+            noSignIn.Features.EnableAuthentication = false;
+            PasskeyRecoveryPlan list = PasskeyRecovery.For(new PasskeyError(PasskeyErrorCategory.NotSignedIn, "x"), PasskeyFlow.Management, configuration, false, true);
+            return new EndedSessionOutcome(
+                Plan(PasskeyErrorCategory.NotSignedIn, PasskeyFlow.Management, configuration, false),
+                Plan(PasskeyErrorCategory.NotSignedIn, PasskeyFlow.Profile, configuration, true),
+                Plan(PasskeyErrorCategory.NotSignedIn, PasskeyFlow.Management, noSignIn, false),
+                Plan(PasskeyErrorCategory.NotSignedIn, PasskeyFlow.SignIn, configuration, false),
+                Actions(list),
+                Plan(PasskeyErrorCategory.InvalidOptions, PasskeyFlow.Management, configuration, true),
+                Plan(PasskeyErrorCategory.InvalidOptions, PasskeyFlow.Profile, configuration, true));
+        })
+        .TheTest
+        .ShouldPass<EndedSessionOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("a lost session while managing offers sign in again: " + outcome.Management, outcome.Management == "SignInAgain,Back");
+            because.ItsTrue("so does one while saving the profile: " + outcome.Profile, outcome.Profile == "SignInAgain,Back");
+            because.ItsTrue("an app without passkey sign-in offers try again instead: " + outcome.WithoutSignIn, outcome.WithoutSignIn == "TryAgain,Back");
+            because.ItsTrue("sign-in itself is unchanged: " + outcome.SignIn, outcome.SignIn == "TryAgain,Back");
+            because.ItsTrue("a list that couldn't load for a lost session still has a way out: " + outcome.InPlaceOfList, outcome.InPlaceOfList == "SignInAgain");
+            because.ItsTrue("a refused rename or removal goes back, not again: " + outcome.RefusedChange, outcome.RefusedChange == "Back");
+            because.ItsTrue("a refused profile goes back, not again: " + outcome.RefusedProfile, outcome.RefusedProfile == "Back");
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    [UnitTest]
     public void RefuseMissingArguments()
     {
         After.Setup(reg => reg.Set(PasskeyClientFixture.ValidConfiguration()))
@@ -192,11 +225,19 @@ public class PasskeyRecoveryShould : UnitTestMenuContainer
     // The table the screens are built to, written out independently of PasskeyRecovery's switch.
     private static string Expected(PasskeyErrorCategory category, PasskeyFlow flow, PasskeyText text)
     {
-        string failed = flow == PasskeyFlow.SignIn ? text.SignInFailedTitle : text.RegistrationFailedTitle;
+        string failed = flow switch
+        {
+            PasskeyFlow.SignIn => text.SignInFailedTitle,
+            PasskeyFlow.Management => text.ManagementFailedTitle,
+            PasskeyFlow.Profile => text.ProfileFailedTitle,
+            _ => text.RegistrationFailedTitle
+        };
         string signInInstead = flow == PasskeyFlow.Registration ? ",SignInInstead" : string.Empty;
+        bool signedIn = flow == PasskeyFlow.Management || flow == PasskeyFlow.Profile;
         string message = "said " + category;
         return category switch
         {
+            PasskeyErrorCategory.NotSignedIn when signedIn => $"loud|{failed}|{message}|-|SignInAgain,Back",
             PasskeyErrorCategory.UserCancelled => $"quiet|{string.Empty}|{text.Cancelled}|-|",
             PasskeyErrorCategory.UnsupportedOperatingSystem or PasskeyErrorCategory.FeatureDisabled => $"loud|{text.UnavailableTitle}|{message}|-|Back",
             PasskeyErrorCategory.MissingCredentialProvider or PasskeyErrorCategory.DeviceSecurityNotConfigured => $"loud|{text.DeviceSetupTitle}|{message}|{text.DeviceSetupHint}|TryAgain{signInInstead},Back",
@@ -245,4 +286,6 @@ public class PasskeyRecoveryShould : UnitTestMenuContainer
         string TypedNetwork, string UntypedRefused);
 
     private sealed record NullOutcome(bool NullError, bool NullConfiguration, bool NullOffers);
+
+    private sealed record EndedSessionOutcome(string Management, string Profile, string WithoutSignIn, string SignIn, string InPlaceOfList, string RefusedChange, string RefusedProfile);
 }

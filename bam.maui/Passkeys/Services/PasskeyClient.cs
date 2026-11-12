@@ -103,9 +103,10 @@ public sealed class PasskeyClient : IPasskeyClient
     }
 
     /// <inheritdoc />
-    public async Task<PasskeyResult> AddPasskeyAsync(CancellationToken cancellationToken = default)
+    public Task<PasskeyResult<string>> AddPasskeyAsync(string? name = null, CancellationToken cancellationToken = default)
     {
-        PasskeyResult<bool> result = await RunAsync<bool>("additional registration", _configuration.Features.EnableManagement, true, async token =>
+        string? passkeyName = string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+        return RunAsync<string>("additional registration", _configuration.Features.EnableManagement, true, async token =>
         {
             WebAuthnCreationOptions options = await FromBackend(() => _backend.BeginAdditionalRegistrationAsync(token), token).ConfigureAwait(false);
             if (options is null)
@@ -113,10 +114,13 @@ public sealed class PasskeyClient : IPasskeyClient
                 throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend returned no creation options.");
             }
             WebAuthnRegistrationResponse response = Require(await _authenticator.CreateAsync(options, token).ConfigureAwait(false));
-            await FromBackend(() => Completed(_backend.CompleteAdditionalRegistrationAsync(response, token)), token).ConfigureAwait(false);
-            return true;
-        }, cancellationToken).ConfigureAwait(false);
-        return WithoutValue(result);
+            string credentialId = await FromBackend(() => _backend.CompleteAdditionalRegistrationAsync(response, passkeyName, token), token).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(credentialId))
+            {
+                throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend did not name the new passkey.");
+            }
+            return credentialId;
+        }, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -150,15 +154,54 @@ public sealed class PasskeyClient : IPasskeyClient
     }
 
     /// <inheritdoc />
-    public async Task<PasskeyResult> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
+    public Task<PasskeyResult<PasskeySignOut>> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
     {
-        PasskeyResult<bool> result = await RunAsync<bool>("passkey deletion", _configuration.Features.EnableManagement, false, async token =>
+        return RunAsync<PasskeySignOut>("passkey deletion", _configuration.Features.EnableManagement, false, async token =>
         {
-            if (string.IsNullOrWhiteSpace(credentialId))
+            RequireCredentialId(credentialId);
+            PasskeySignOut signOut = await FromBackend(() => _backend.DeletePasskeyAsync(credentialId, token), token).ConfigureAwait(false);
+            return signOut ?? throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend did not say whether the session ended.");
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PasskeyResult> RenamePasskeyAsync(string credentialId, string? name, CancellationToken cancellationToken = default)
+    {
+        string? passkeyName = string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+        PasskeyResult<bool> result = await RunAsync<bool>("passkey rename", _configuration.Features.EnableManagement, false, async token =>
+        {
+            RequireCredentialId(credentialId);
+            await FromBackend(() => Completed(_backend.RenamePasskeyAsync(credentialId, passkeyName, token)), token).ConfigureAwait(false);
+            return true;
+        }, cancellationToken).ConfigureAwait(false);
+        return WithoutValue(result);
+    }
+
+    /// <inheritdoc />
+    public Task<PasskeyResult<PasskeySignOut>> SignOutAsync(CancellationToken cancellationToken = default)
+    {
+        return RunAsync<PasskeySignOut>("sign-out", true, false, async token =>
+        {
+            PasskeySignOut signOut = await FromBackend(() => _backend.SignOutAsync(token), token).ConfigureAwait(false);
+            return signOut ?? throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend did not say whether the session ended.");
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PasskeyResult> SaveProfileAsync(PasskeyProfile profile, CancellationToken cancellationToken = default)
+    {
+        PasskeyResult<bool> result = await RunAsync<bool>("profile write", true, false, async token =>
+        {
+            if (profile is null || string.IsNullOrWhiteSpace(profile.DisplayName))
             {
-                throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "A credential id is required.");
+                throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "A profile with a display name is required.");
             }
-            await FromBackend(() => Completed(_backend.DeletePasskeyAsync(credentialId, token)), token).ConfigureAwait(false);
+            PasskeyProfile trimmed = new PasskeyProfile
+            {
+                DisplayName = profile.DisplayName.Trim(),
+                Email = string.IsNullOrWhiteSpace(profile.Email) ? null : profile.Email.Trim()
+            };
+            await FromBackend(() => Completed(_backend.SaveProfileAsync(trimmed, token)), token).ConfigureAwait(false);
             return true;
         }, cancellationToken).ConfigureAwait(false);
         return WithoutValue(result);
@@ -249,6 +292,14 @@ public sealed class PasskeyClient : IPasskeyClient
     {
         await task.ConfigureAwait(false);
         return true;
+    }
+
+    private static void RequireCredentialId(string credentialId)
+    {
+        if (string.IsNullOrWhiteSpace(credentialId))
+        {
+            throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "A credential id is required.");
+        }
     }
 
     private static WebAuthnRegistrationResponse Require(WebAuthnRegistrationResponse? response)
