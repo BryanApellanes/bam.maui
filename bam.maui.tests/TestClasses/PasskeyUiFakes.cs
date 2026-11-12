@@ -70,9 +70,20 @@ public sealed class FakePasskeyNavigator : IPasskeyNavigator
     /// <summary>What the last SignedOutAsync was told.</summary>
     public PasskeySignOut? SignedOut { get; private set; }
 
+    /// <summary>Thrown by SignedOutAsync while set.</summary>
+    public Exception? SignedOutFailure { get; set; }
+
+    /// <summary>Runs inside SignedOutAsync, while the screen is still on its signed-out hand-off.</summary>
+    public Action? WhileSignedOut { get; set; }
+
     public Task SignedOutAsync(PasskeySignOut signOut)
     {
         Calls.Add("signedOut");
+        WhileSignedOut?.Invoke();
+        if (SignedOutFailure is not null)
+        {
+            return Task.FromException(SignedOutFailure);
+        }
         SignedOut = signOut;
         return Task.CompletedTask;
     }

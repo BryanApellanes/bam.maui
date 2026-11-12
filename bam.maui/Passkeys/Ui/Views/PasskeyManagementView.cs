@@ -99,10 +99,25 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
         screen.Children.Add(PasskeyViewParts.Secondary(text.SignOut, nameof(PasskeyManagementViewModel.SignOutCommand)));
         PasskeyViewParts.ShowWhen(screen, nameof(PasskeyFlowViewModel.IsReady));
 
+        // While the app's SignedOutAsync runs the screen says what is happening, not a blank page.
+        ActivityIndicator spinner = new ActivityIndicator { IsRunning = true, HeightRequest = 32 };
+        spinner.SetDynamicResource(ActivityIndicator.ColorProperty, PasskeyResourceKeys.Primary);
+        VerticalStackLayout signedOut = new VerticalStackLayout
+        {
+            Spacing = 16,
+            Children =
+            {
+                PasskeyViewParts.Heading(nameof(PasskeyManagementViewModel.SignedOutTitle)),
+                PasskeyViewParts.Body(nameof(PasskeyManagementViewModel.SigningOutText)),
+                spinner
+            }
+        };
+        PasskeyViewParts.ShowWhen(signedOut, nameof(PasskeyManagementViewModel.ShowsSigningOut));
+
         return new VerticalStackLayout
         {
             Spacing = 0,
-            Children = { screen, new PasskeyStatusView(text, viewModel.Configuration.Experience.AlternativeSignInLabel) }
+            Children = { screen, signedOut, new PasskeyStatusView(text, viewModel.Configuration.Experience.AlternativeSignInLabel) }
         };
 
         View Row()

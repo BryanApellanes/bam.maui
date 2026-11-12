@@ -21,6 +21,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     private PasskeyItem? _editing;
     private string _editName = string.Empty;
     private PasskeyItem? _pendingRemoval;
+    private bool _signingOut;
 
     /// <summary>Creates the view model.</summary>
     /// <param name="client">The passkey client.</param>
@@ -160,9 +161,24 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         return RunAsync(token => Client.GetRegisteredPasskeysAsync(token), ShowAsync, workingText: Text.Updating, replacesForm: true);
     }
 
+    /// <summary>Whether the signed-out panel shows: the session has ended and the app's <see cref="IPasskeyNavigator.SignedOutAsync"/> is running.</summary>
+    public bool ShowsSigningOut => _signingOut && HasSucceeded;
+
+    /// <summary>Shown while the app's <see cref="IPasskeyNavigator.SignedOutAsync"/> runs.</summary>
+    public string SignedOutTitle => Text.SignedOutTitle;
+
+    /// <summary>The line under <see cref="SignedOutTitle"/>.</summary>
+    public string SigningOutText => Text.SigningOut;
+
     /// <inheritdoc />
     protected override void OnStateChanged()
     {
+        // A session found gone (the failure offers "sign in again") takes the account off the screen, so Back doesn't
+        // bring back a list nothing can act on.
+        if (State == PasskeyViewState.Failed && Recovery is { } plan && plan.Actions.Contains(PasskeyRecoveryAction.SignInAgain))
+        {
+            ClearAccount();
+        }
         RaiseShows();
     }
 
@@ -246,17 +262,35 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         return RunAsync(token => Client.SignOutAsync(token), SignedOutAsync, workingText: Text.Updating);
     }
 
-    // The session is over: nothing of the account stays on a screen the app may show again.
+    // The session is over: nothing of the account stays on a screen the app may show again, so it is cleared before the
+    // app's navigation runs.  If that navigation throws, Back from its failure finds an empty screen, not the old list.
+    // While it runs the screen is Succeeded and shows SignedOutTitle.
     private async Task SignedOutAsync(PasskeySignOut signOut)
     {
-        await Navigator.SignedOutAsync(signOut);
+        ClearAccount();
+        _signingOut = true;
+        OnPropertyChanged(nameof(ShowsSigningOut));
+        try
+        {
+            await Navigator.SignedOutAsync(signOut);
+        }
+        finally
+        {
+            _signingOut = false;
+            OnPropertyChanged(nameof(ShowsSigningOut));
+        }
+        Reset();
+    }
+
+    private void ClearAccount()
+    {
         Passkeys.Clear();
         NewPasskeyName = string.Empty;
         EditName = string.Empty;
         Editing = null;
         PendingRemoval = null;
         IsLoaded = false;
-        Reset();
+        RaiseShows();
     }
 
     private void BeginRename(PasskeyItem item)
@@ -307,6 +341,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         OnPropertyChanged(nameof(ShowsAdd));
         OnPropertyChanged(nameof(ShowsEditor));
         OnPropertyChanged(nameof(ShowsRemoval));
+        OnPropertyChanged(nameof(ShowsSigningOut));
     }
 }
 

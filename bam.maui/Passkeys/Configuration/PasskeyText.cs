@@ -194,6 +194,12 @@ public sealed class PasskeyText
     /// <summary>Shown on the sign-in screen while the app takes over after sign-in.</summary>
     public string SigningIn { get; set; } = "Opening your account.";
 
+    /// <summary>The heading on the management screen while the app takes over after sign-out.</summary>
+    public string SignedOutTitle { get; set; } = "You're signed out";
+
+    /// <summary>Shown under <see cref="SignedOutTitle"/>.</summary>
+    public string SigningOut { get; set; } = "Closing your account.";
+
     /// <summary>Puts the app name into a member that takes it.</summary>
     /// <param name="template">The member's text.</param>
     /// <param name="applicationName">The brand's app name.</param>

@@ -127,6 +127,43 @@ public class HttpPasskeyManagementShould : UnitTestMenuContainer
     }
 
     [UnitTest]
+    public void ForgetTheSessionWhenSignOutFails()
+    {
+        After.Setup(reg => reg.Set(new FakeAccountEndpoints()))
+        .When<FakeAccountEndpoints>("signs in, then signs out offline, against a 500, and against a reply without signedOut", (unused, reg) =>
+        {
+            string offline = FailedSignOut(new FakeResponse { Throw = new HttpRequestException("offline") });
+            string serverError = FailedSignOut(new FakeResponse { Status = HttpStatusCode.InternalServerError, Body = "{}" });
+            string noAnswer = FailedSignOut(new FakeResponse { Body = "{\"nextUrl\":null}" });
+            return new FailedSignOutOutcome(offline, serverError, noAnswer);
+        })
+        .TheTest
+        .ShouldPass<FailedSignOutOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("an unreachable sign-out still drops the cookie: " + outcome.Offline, outcome.Offline == "NetworkFailure|null");
+            because.ItsTrue("so does one the server failed: " + outcome.ServerError, outcome.ServerError == "InvalidServerResponse|null");
+            because.ItsTrue("and one whose answer isn't the contract: " + outcome.NoAnswer, outcome.NoAnswer == "InvalidServerResponse|null");
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    // Signs in (setting the session cookie), signs out against the given answer, then lists: the category the sign-out
+    // failed with, and the cookie the list sent.
+    private static string FailedSignOut(FakeResponse signOutAnswer)
+    {
+        FakeAccountEndpoints fake = new FakeAccountEndpoints()
+            .Respond(HttpStatusCode.OK, "{\"handle\":\"ada\"}", SessionCookie)
+            .Respond(signOutAnswer)
+            .Respond(HttpStatusCode.OK, "{\"passkeys\":[]}");
+        using HttpPasskeyBackend backend = HttpPasskeyBackend.Create(PasskeyClientFixture.ValidConfiguration(), null, fake);
+        backend.CompleteAuthenticationAsync(new PasskeyAuthenticationChallenge { Options = new WebAuthnRequestOptions("{}"), CeremonyId = "c-1" }, new WebAuthnAssertionResponse(Credential)).GetAwaiter().GetResult();
+        PasskeyException? failed = Caught(() => backend.SignOutAsync());
+        backend.GetPasskeysAsync().GetAwaiter().GetResult();
+        return (failed?.Category.ToString() ?? "no failure") + "|" + (fake.Requests[2].Cookie ?? "null");
+    }
+
+    [UnitTest]
     public void RefuseMalformedManagementResponses()
     {
         After.Setup(reg => reg.Set(new FakeAccountEndpoints()))
@@ -203,6 +240,8 @@ public class HttpPasskeyManagementShould : UnitTestMenuContainer
     private sealed record ManageOutcome(bool ProfileCreated, string Passkeys, string AddMembers, string Added, string Rename, string ClearedName, string Profile, string Cookies, string Headers, bool AnyOrigin, string Delete, string Removed, PasskeyErrorCategory? AfterRemoval);
 
     private sealed record SignOutOutcome(bool ProfileCreated, bool KeptSignedOut, string? CookieAfterRemoval, string SignOut, string SignedOut, string? CookieAfterSignOut);
+
+    private sealed record FailedSignOutOutcome(string Offline, string ServerError, string NoAnswer);
 
     private sealed record MalformedOutcome(string Wrong, PasskeyErrorCategory? NotSaved, string? NotSavedCode, PasskeyErrorCategory? UnsafeRename, int RenameSent);
 }

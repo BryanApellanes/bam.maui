@@ -26,6 +26,13 @@ Changed (breaking for other implementations of the interfaces)
 Fixed
 - A sign-out, or removing the session's passkey, clears the cookie jar `HttpPasskeyBackend.Create` made, so the old session cookie isn't sent again. A host's own `HttpClient` has to do this itself (the README says so).
 
+Review round 1 (bam.maui#19)
+- Sign-out clears the cookie jar however the call ends: offline, a timeout, a 5xx, or an answer without `signedOut`. Before, a failed sign-out left a valid session on the device.
+- The management screen clears the account before it calls the app's `SignedOutAsync`, and shows "You're signed out" with a spinner while that runs (`ShowsSigningOut`, `SignedOutTitle`, `SigningOutText`, `PasskeyText.SignedOutTitle` and `SigningOut`). The screen was blank during the hand-off, and when the navigator threw, Back brought back the ended session's list.
+- A session found gone on the management screen (a failure that offers "Sign in again") takes the list off the screen.
+- The README says the management page needs `EnableManagement`. With it off, the app signs out through `IPasskeyClient.SignOutAsync`.
+- 2 more unit tests (92 in all).
+
 Decisions
 - Adding, renaming and removing stay behind `EnableManagement`. Sign-out and saving the profile don't: a signed-in person can always leave, and finish an account they already have.
 - The server's `ProfileNotSaved` maps to `Unknown`: the request was fine, so there is nothing for the user to change.

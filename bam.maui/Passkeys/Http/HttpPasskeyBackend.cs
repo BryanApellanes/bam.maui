@@ -276,11 +276,18 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
     public async Task<PasskeySignOut> SignOutAsync(CancellationToken cancellationToken = default)
     {
         byte[] body = Body(_ => { });
-        JsonElement root = await SendAsync(HttpMethod.Post, Routes.SignOut, Routes.SignOut, body, cancellationToken).ConfigureAwait(false);
-        PasskeySignOut signOut = ReadSignOut(root, Routes.SignOut);
-        // The person asked to leave: whatever the server says, this client stops sending the cookie.
-        _cookieJar?.Clear();
-        return signOut;
+        try
+        {
+            JsonElement root = await SendAsync(HttpMethod.Post, Routes.SignOut, Routes.SignOut, body, cancellationToken).ConfigureAwait(false);
+            return ReadSignOut(root, Routes.SignOut);
+        }
+        finally
+        {
+            // The person asked to leave: whatever the server says, or if it never answered, this client stops sending
+            // the cookie.  A server that never got the request keeps the session until it expires, but this device no
+            // longer holds it.
+            _cookieJar?.Clear();
+        }
     }
 
     /// <inheritdoc />

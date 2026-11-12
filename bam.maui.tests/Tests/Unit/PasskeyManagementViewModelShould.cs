@@ -262,6 +262,60 @@ public class PasskeyManagementViewModelShould : UnitTestMenuContainer
         .UnlessItFailed();
     }
 
+    [UnitTest]
+    public void ClearTheAccountBeforeTheAppTakesOver()
+    {
+        After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
+        .When<ScriptedPasskeyClient>("signs out while the app's SignedOutAsync looks at the screen, then with a navigator that throws and goes Back, then loses the session renaming", (client, reg) =>
+        {
+            FakePasskeyNavigator navigator = new FakePasskeyNavigator();
+            PasskeyManagementViewModel screen = Screen(client, navigator);
+            Wait(screen.LoadAsync());
+            HandOffShot? during = null;
+            navigator.WhileSignedOut = () => during = new HandOffShot(screen.ShowsSigningOut, screen.IsReady, screen.Passkeys.Count, screen.SignedOutTitle, screen.SigningOutText);
+            Wait(screen.SignOutCommand.ExecuteAsync());
+            HandOffShot after = new HandOffShot(screen.ShowsSigningOut, screen.IsReady, screen.Passkeys.Count, screen.SignedOutTitle, screen.SigningOutText);
+
+            FakePasskeyNavigator broken = new FakePasskeyNavigator { SignedOutFailure = new InvalidOperationException("no shell") };
+            PasskeyManagementViewModel brokenScreen = Screen(client, broken);
+            Wait(brokenScreen.LoadAsync());
+            Wait(brokenScreen.SignOutCommand.ExecuteAsync());
+            FailedShot failed = Failed(brokenScreen);
+            int failedCount = brokenScreen.Passkeys.Count;
+            Wait(brokenScreen.BackCommand.ExecuteAsync());
+            ScreenShot back = Shot(brokenScreen);
+
+            client.RenameResult = PasskeyResult.Failure(ScriptedPasskeyClient.Error(PasskeyErrorCategory.NotSignedIn));
+            PasskeyManagementViewModel lost = Screen(client, new FakePasskeyNavigator());
+            Wait(lost.LoadAsync());
+            Wait(lost.Passkeys[0].RenameCommand.ExecuteAsync());
+            lost.EditName = "Work";
+            Wait(lost.SaveNameCommand.ExecuteAsync());
+            FailedShot lostShot = Failed(lost);
+            int lostCount = lost.Passkeys.Count;
+            Wait(lost.BackCommand.ExecuteAsync());
+            ScreenShot lostBack = Shot(lost);
+            return new HandOffOutcome(during, after, failed, failedCount, back, lostShot, lostCount, lostBack, lost.ShowsEditor);
+        })
+        .TheTest
+        .ShouldPass<HandOffOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("the app was handed the sign-out", outcome.During is not null);
+            because.ItsTrue("while it runs the screen shows the signed-out panel, not a blank page: " + outcome.During, outcome.During!.SigningOut && !outcome.During.Ready);
+            because.ItsTrue("and the account is already gone", outcome.During.Count == 0);
+            because.ItsTrue("with a heading and a line: " + outcome.During, outcome.During.Title == "You're signed out" && outcome.During.Line == new PasskeyText().SigningOut);
+            because.ItsTrue("afterwards the panel is gone: " + outcome.After, !outcome.After.SigningOut && outcome.After.Ready && outcome.After.Count == 0);
+            because.ItsTrue("a navigator that throws shows a failure: " + outcome.Failed, outcome.Failed.Failed && outcome.Failed.Back);
+            because.ItsTrue("with the account already cleared", outcome.FailedCount == 0);
+            because.ItsTrue("and Back doesn't bring the old list back: " + outcome.Back, outcome.Back.State == PasskeyViewState.Ready && !outcome.Back.List && outcome.Back.Count == 0);
+            because.ItsTrue("a session lost while renaming offers sign in again: " + outcome.Lost, outcome.Lost.Failed && outcome.Lost.SignInAgain);
+            because.ItsTrue("and takes the list off the screen", outcome.LostCount == 0);
+            because.ItsTrue("so Back finds no list or editor: " + outcome.LostBack, !outcome.LostBack.List && outcome.LostBack.Count == 0 && !outcome.LostEditor);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
     private static PasskeyManagementViewModel Screen(ScriptedPasskeyClient client, IPasskeyNavigator navigator)
     {
         return new PasskeyManagementViewModel(client, PasskeyClientFixture.ValidConfiguration(), navigator);
@@ -302,4 +356,8 @@ public class PasskeyManagementViewModelShould : UnitTestMenuContainer
     private sealed record RemoveOutcome(bool AskedLaptop, bool Kept, FailedShot Last, string LastMessage, bool BackToList, string Warning, string? Deleted, string Navigation, string? NextUrl, ScreenShot After, bool Loaded);
 
     private sealed record SignOutOutcome(string Calls, string Navigation, string? NextUrl, int Left, string OlderNavigation, FailedShot Offline);
+
+    private sealed record HandOffShot(bool SigningOut, bool Ready, int Count, string Title, string Line);
+
+    private sealed record HandOffOutcome(HandOffShot? During, HandOffShot After, FailedShot Failed, int FailedCount, ScreenShot Back, FailedShot Lost, int LostCount, ScreenShot LostBack, bool LostEditor);
 }
