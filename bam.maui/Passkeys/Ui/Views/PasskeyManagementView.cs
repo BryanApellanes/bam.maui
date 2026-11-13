@@ -105,7 +105,6 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
         heir.SetBinding(Picker.SelectedItemProperty, nameof(PasskeyManagementViewModel.SelectedHeir), BindingMode.TwoWay);
         heir.SetDynamicResource(Picker.TextColorProperty, PasskeyResourceKeys.Text);
         heir.SetDynamicResource(Picker.FontFamilyProperty, PasskeyResourceKeys.FontFamily);
-        SemanticProperties.SetDescription(heir, text.MoveAccountKeyTo);
         VerticalStackLayout handover = new VerticalStackLayout
         {
             Spacing = 12,

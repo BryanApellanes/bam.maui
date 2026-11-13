@@ -198,7 +198,7 @@ public sealed class PasskeyText
     public string RemoveWithoutMoving { get; set; } = "Remove without moving";
 
     /// <summary>What removing without moving does, shown beside <see cref="RemoveWithoutMoving"/>.</summary>
-    public string RemoveWithoutMovingMessage { get; set; } = "If you no longer have the device, remove it without moving. Your account key stays on record, but no passkey will hold it.";
+    public string RemoveWithoutMovingMessage { get; set; } = "If you no longer have the device, remove it without moving. You can't sign in with it after that, but its key still counts as your account key until it is replaced, and you can't replace it here yet.";
 
     /// <summary>Shown when the server refuses the passkey chosen to hold the account key.</summary>
     public string AccountKeyHeirRefusedMessage { get; set; } = "That passkey can't hold your account key. Choose another one.";

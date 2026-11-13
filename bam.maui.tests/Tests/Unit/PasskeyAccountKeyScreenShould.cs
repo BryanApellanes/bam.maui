@@ -51,7 +51,8 @@ public class PasskeyAccountKeyScreenShould : UnitTestMenuContainer
             because.ItsTrue("another passkey's doesn't", outcome.NoNoteForOthers);
             because.ItsTrue("a handover request opens the panel, not an error: " + outcome.Opened, outcome.Opened.Shows && outcome.Opened.State == PasskeyViewState.Ready && !outcome.Opened.Add);
             because.ItsTrue("offering every other passkey: " + outcome.Opened.Choices, outcome.Opened.Choices == "laptop,tablet");
-            because.ItsTrue("starting with the first, since this session's passkey is the one going: " + outcome.Opened.Selected, outcome.Opened.Selected == "laptop");
+            because.ItsTrue("with nothing chosen, since this session's passkey is the one going and there are two to choose from: " + outcome.Opened.Selected, outcome.Opened.Selected == "none");
+            because.ItsTrue("so Move is off until the person chooses", !outcome.Opened.MoveEnabled);
             because.ItsTrue("the move names the removed passkey and the chosen heir: " + outcome.Sent, outcome.Sent == "phone|tablet");
             because.ItsTrue("after one list and one refused removal: " + outcome.Calls, outcome.Calls == "list,delete,handover");
             because.ItsTrue("a move that ended the session signs out through the app", outcome.SignedOutTo == "/account/signedout");
@@ -142,9 +143,14 @@ public class PasskeyAccountKeyScreenShould : UnitTestMenuContainer
             client.DeleteResults.Enqueue(Refused("LastPasskey"));
             Wait(screen.RemoveWithoutMovingCommand.ExecuteAsync());
             RefusalShot refused = Refusal(screen);
-            Wait(screen.BackCommand.ExecuteAsync());
-            bool refusedBack = screen.ShowsHandover;
+            string refusedBack = BackReloads(client, screen);
 
+            OpenPanel(client, screen, 0);
+            client.DeleteResults.Enqueue(Refused("NotFound"));
+            Wait(screen.RemoveWithoutMovingCommand.ExecuteAsync());
+            string goneBack = BackReloads(client, screen);
+
+            OpenPanel(client, screen, 0);
             client.DeleteResult = PasskeyResult<PasskeySignOut>.Success(new PasskeySignOut { SignedOut = false });
             Wait(screen.RemoveWithoutMovingCommand.ExecuteAsync());
             string removed = client.DeletedId + "|" + client.Calls[client.Calls.Count - 2] + "|" + client.Calls[client.Calls.Count - 1] + "|" + screen.ShowsHandover;
@@ -152,7 +158,7 @@ public class PasskeyAccountKeyScreenShould : UnitTestMenuContainer
             Wait(screen.Passkeys[1].RemoveCommand.ExecuteAsync());
             Wait(screen.ConfirmRemoveCommand.ExecuteAsync());
             string ordinary = client.Calls[client.Calls.Count - 2] + "|" + screen.ShowsHandover + "|" + client.Calls.Contains("handover");
-            return new KeepOutcome(commandsWhileOpen, cancelled, refused, refusedBack, removed, ordinary);
+            return new KeepOutcome(commandsWhileOpen, cancelled, refused, refusedBack, goneBack, removed, ordinary, new PasskeyText().RemoveWithoutMovingMessage);
         })
         .TheTest
         .ShouldPass<KeepOutcome>((because, outcome) =>
@@ -160,12 +166,69 @@ public class PasskeyAccountKeyScreenShould : UnitTestMenuContainer
             because.ItsTrue("the panel's actions are available while it shows", outcome.CommandsWhileOpen);
             because.ItsTrue("Keep closes it, and adding comes back", outcome.Cancelled);
             because.ItsTrue("a refused removal says so in the app's words: " + outcome.Refused, outcome.Refused.Message == new PasskeyText().LastPasskeyMessage);
-            because.ItsTrue("and Back returns to the panel", outcome.RefusedBack);
+            because.ItsTrue("and, since the list changed after the panel opened, Back loads it again with the panel closed: " + outcome.RefusedBack, outcome.RefusedBack == "1|False|True");
+            because.ItsTrue("so does a passkey that is already gone: " + outcome.GoneBack, outcome.GoneBack == "1|False|True");
+            because.ItsTrue("the panel says the removed passkey's key still counts until it is replaced: " + outcome.KeepText,
+                outcome.KeepText.Contains("still counts as your account key until it is replaced", StringComparison.Ordinal));
             because.ItsTrue("removing without moving keeps the key set, then reloads: " + outcome.Removed, outcome.Removed == "phone|deleteKeepingKeySet|list|False");
             because.ItsTrue("an ordinary passkey is a plain removal with no panel: " + outcome.Ordinary, outcome.Ordinary == "delete|False|False");
         })
         .SoBeHappy()
         .UnlessItFailed();
+    }
+
+    [UnitTest]
+    public void CloseThePanelWhenAnotherActionStarts()
+    {
+        After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
+        .When<ScriptedPasskeyClient>("opens the panel, then renames another row; opens it, then removes another row; opens it, then refreshes", (client, reg) =>
+        {
+            PasskeyManagementViewModel screen = Screen(client, new FakePasskeyNavigator());
+            client.ListResults.Enqueue(ScriptedPasskeyClient.Listed(Phone, Laptop, Tablet));
+            Wait(screen.LoadAsync());
+
+            OpenPanel(client, screen, 0);
+            Wait(screen.Passkeys[1].RenameCommand.ExecuteAsync());
+            string afterRename = Closed(screen);
+            bool editorOpen = screen.ShowsEditor;
+            Wait(screen.CancelEditCommand.ExecuteAsync());
+
+            OpenPanel(client, screen, 0);
+            Wait(screen.Passkeys[2].RemoveCommand.ExecuteAsync());
+            string afterRemove = Closed(screen);
+            bool removalOpen = screen.ShowsRemoval && screen.PendingRemoval?.CredentialId == "tablet";
+            Wait(screen.KeepCommand.ExecuteAsync());
+
+            OpenPanel(client, screen, 0);
+            Wait(screen.RefreshCommand.ExecuteAsync());
+            return new ClosedOutcome(afterRename, editorOpen, afterRemove, removalOpen, Closed(screen) + "|" + screen.ShowsAdd);
+        })
+        .TheTest
+        .ShouldPass<ClosedOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("renaming another row closes the panel: " + outcome.AfterRename, outcome.AfterRename == "False|0|none|False|False|False");
+            because.ItsTrue("and opens the editor alone", outcome.EditorOpen);
+            because.ItsTrue("removing another row closes it: " + outcome.AfterRemove, outcome.AfterRemove == "False|0|none|False|False|False");
+            because.ItsTrue("and asks about that row alone", outcome.RemovalOpen);
+            because.ItsTrue("a refresh closes it and brings adding back: " + outcome.AfterRefresh, outcome.AfterRefresh == "False|0|none|False|False|False|True");
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    // Whether the panel is shut: shown, choices, chosen heir, and whether Move, Remove without moving and Keep can run.
+    private static string Closed(PasskeyManagementViewModel screen)
+    {
+        return screen.ShowsHandover + "|" + screen.HeirChoices.Count + "|" + (screen.SelectedHeir?.CredentialId ?? "none") + "|" + screen.MoveAccountKeyCommand.CanExecute(null)
+            + "|" + screen.RemoveWithoutMovingCommand.CanExecute(null) + "|" + screen.CancelHandoverCommand.CanExecute(null);
+    }
+
+    // Leaves a refusal with Back: how many lists that loaded, whether the panel shows, whether the list shows.
+    private static string BackReloads(ScriptedPasskeyClient client, PasskeyManagementViewModel screen)
+    {
+        int before = client.Calls.Count(call => call == "list");
+        Wait(screen.BackCommand.ExecuteAsync());
+        return (client.Calls.Count(call => call == "list") - before) + "|" + screen.ShowsHandover + "|" + screen.ShowsList;
     }
 
     // Opens the removal confirmation for a row and has the backend ask for the account key to move first.
@@ -188,7 +251,7 @@ public class PasskeyAccountKeyScreenShould : UnitTestMenuContainer
 
     private static PanelShot Panel(PasskeyManagementViewModel screen)
     {
-        return new PanelShot(screen.ShowsHandover, screen.State, screen.ShowsAdd, string.Join(",", screen.HeirChoices.Select(item => item.CredentialId)), screen.SelectedHeir?.CredentialId ?? "none");
+        return new PanelShot(screen.ShowsHandover, screen.State, screen.ShowsAdd, string.Join(",", screen.HeirChoices.Select(item => item.CredentialId)), screen.SelectedHeir?.CredentialId ?? "none", screen.MoveAccountKeyCommand.CanExecute(null));
     }
 
     private static RefusalShot Refusal(PasskeyManagementViewModel screen)
@@ -201,7 +264,7 @@ public class PasskeyAccountKeyScreenShould : UnitTestMenuContainer
         task.GetAwaiter().GetResult();
     }
 
-    private sealed record PanelShot(bool Shows, PasskeyViewState State, bool Add, string Choices, string Selected);
+    private sealed record PanelShot(bool Shows, PasskeyViewState State, bool Add, string Choices, string Selected, bool MoveEnabled);
 
     private sealed record RefusalShot(bool Failed, string Message, bool TryAgain, bool Back);
 
@@ -209,5 +272,7 @@ public class PasskeyAccountKeyScreenShould : UnitTestMenuContainer
 
     private sealed record RefusedMoveOutcome(string Selected, RefusalShot Heir, bool HeirBack, bool Dismissed, RefusalShot Expired, string Retried, RefusalShot Changed, string ChangedBack, RefusalShot Last);
 
-    private sealed record KeepOutcome(bool CommandsWhileOpen, bool Cancelled, RefusalShot Refused, bool RefusedBack, string Removed, string Ordinary);
+    private sealed record KeepOutcome(bool CommandsWhileOpen, bool Cancelled, RefusalShot Refused, string RefusedBack, string GoneBack, string Removed, string Ordinary, string KeepText);
+
+    private sealed record ClosedOutcome(string AfterRename, bool EditorOpen, string AfterRemove, bool RemovalOpen, string AfterRefresh);
 }

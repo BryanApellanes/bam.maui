@@ -172,7 +172,10 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     /// <summary>The passkeys the account key can move to: every listed one except the one being removed.</summary>
     public ObservableCollection<PasskeyItem> HeirChoices { get; } = new ObservableCollection<PasskeyItem>();
 
-    /// <summary>The passkey the account key moves to.  It starts as the one this session signed in with, when that isn't the one being removed.</summary>
+    /// <summary>
+    /// The passkey the account key moves to.  It starts as the one this session signed in with when that one stays, or
+    /// the only other passkey; otherwise it starts empty and Move is off until the person chooses.
+    /// </summary>
     public PasskeyItem? SelectedHeir
     {
         get => _selectedHeir;
@@ -350,7 +353,9 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
                 HeirChoices.Add(passkey);
             }
         }
-        SelectedHeir = HeirChoices.FirstOrDefault(passkey => passkey.IsCurrent) ?? HeirChoices.FirstOrDefault();
+        // This session's passkey when it stays, or the only other one.  Otherwise the person chooses: Move stays off
+        // until they do, rather than the key going to whichever passkey happens to be listed first.
+        SelectedHeir = HeirChoices.FirstOrDefault(passkey => passkey.IsCurrent) ?? (HeirChoices.Count == 1 ? HeirChoices[0] : null);
         PendingHandover = item;
         Reset();
         RaiseShows();
@@ -377,7 +382,18 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         {
             return Task.CompletedTask;
         }
-        return RunAsync(async token => WithRemovalWording(await Client.DeletePasskeyAsync(item.CredentialId, PasskeyKeySetRemoval.KeepKeySet, token)), RemovedAsync, typedInput: true, workingText: Text.Updating);
+        return RunAsync(async token => WithKeepWording(await Client.DeletePasskeyAsync(item.CredentialId, PasskeyKeySetRemoval.KeepKeySet, token)), RemovedAsync, typedInput: true, workingText: Text.Updating);
+    }
+
+    // The panel opened because this passkey could be removed once the key moved, so a refusal now means the list changed
+    // after it opened (a passkey removed elsewhere, or this one): Back goes to a fresh list, as for a refused move.
+    private PasskeyResult<PasskeySignOut> WithKeepWording(PasskeyResult<PasskeySignOut> result)
+    {
+        if (result.Error is { BackendCode: HttpPasskeyBackend.BackendCodes.LastPasskey or HttpPasskeyBackend.BackendCodes.NotFound })
+        {
+            _reloadOnBack = true;
+        }
+        return WithRemovalWording(result);
     }
 
     private Task CancelHandoverAsync()
