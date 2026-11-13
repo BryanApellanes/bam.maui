@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Key-set handover (bam.maui#7, against bam.useraccounts#20)
+
+Added
+- `IPasskeyClient.HandOverKeySetAsync(id, heirId?)`: moves the account's key set off the passkey that holds it to another of the account's passkeys, then removes it. The backend issues assertion options for the passkey being removed, the system prompt runs them, and the backend verifies before anything changes. Gated on `EnableManagement`; refuses an heir that is the passkey being removed before asking anyone.
+- `IPasskeyClient.DeletePasskeyAsync(id, PasskeyKeySetRemoval)` and the matching `IPasskeyBackend` member. `KeepKeySet` removes the key-set passkey without moving the key set, for a lost device.
+- `IPasskeyBackend.BeginKeySetHandoverAsync` and `CompleteKeySetHandoverAsync`, and `PasskeyHandoverChallenge`. `HttpPasskeyBackend` posts `passkeys/{id}/handover/begin` and `.../complete`, sends `?keySet=keep`, maps the new refusal codes (`KeySetHandoverRequired`, `LastCredential`, `InvalidHeir`, `NotKeySet`, `RotationUnavailable`, `KeySetChanged`, `HeirGone` to `InvalidOptions`; `HandoverExpired` to `ExpiredChallenge`; `ProofRefused` to `ServerVerificationFailed`), and clears its cookie jar when a handover ends the session.
+- The management screen tags the key-set passkey "Account key" and notes it in the removal confirmation. When the backend asks for a handover it opens a "Move your account key" panel (`ShowsHandover`, `HeirChoices`, `SelectedHeir`, `MoveAccountKeyCommand`, `RemoveWithoutMovingCommand`, `CancelHandoverCommand`). Each refusal is worded on `PasskeyText`; one that shows the list changed reloads it on Back.
+- `PasskeyFlowViewModel.AfterBackAsync`, a hook that runs after Back leaves an error screen.
+- 8 unit tests (100 in all): suites `pkks` and `pkak`.
+
+Changed (breaking for other implementations of the interfaces)
+- `IPasskeyBackend` and `IPasskeyClient` have the new members above. The old `DeletePasskeyAsync(id)` stays, as a default interface method that calls the new overload with `PasskeyKeySetRemoval.Default`.
+
+Not yet
+- The lost-device recovery (`keyset/recovery/*`, `pendingRecovery`, `keySetRecoverable`; contract on bam.maui#7) waits for its bam.useraccounts PR.
+
 ### Phase 5: passkey management (bam.maui#18)
 
 Added

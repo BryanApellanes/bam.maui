@@ -156,11 +156,48 @@ public sealed class PasskeyClient : IPasskeyClient
     /// <inheritdoc />
     public Task<PasskeyResult<PasskeySignOut>> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
     {
+        return DeletePasskeyAsync(credentialId, PasskeyKeySetRemoval.Default, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<PasskeyResult<PasskeySignOut>> DeletePasskeyAsync(string credentialId, PasskeyKeySetRemoval keySet, CancellationToken cancellationToken = default)
+    {
         return RunAsync<PasskeySignOut>("passkey deletion", _configuration.Features.EnableManagement, false, async token =>
         {
             RequireCredentialId(credentialId);
-            PasskeySignOut signOut = await FromBackend(() => _backend.DeletePasskeyAsync(credentialId, token), token).ConfigureAwait(false);
-            return signOut ?? throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend did not say whether the session ended.");
+            if (!Enum.IsDefined(keySet))
+            {
+                throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "Unknown key-set removal choice.");
+            }
+            PasskeySignOut signOut = await FromBackend(() => _backend.DeletePasskeyAsync(credentialId, keySet, token), token).ConfigureAwait(false);
+            return RequireSignOut(signOut);
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<PasskeyResult<PasskeySignOut>> HandOverKeySetAsync(string credentialId, string? heirCredentialId = null, CancellationToken cancellationToken = default)
+    {
+        string? heir = string.IsNullOrWhiteSpace(heirCredentialId) ? null : heirCredentialId;
+        return RunAsync<PasskeySignOut>("key-set handover", _configuration.Features.EnableManagement, true, async token =>
+        {
+            RequireCredentialId(credentialId);
+            if (string.Equals(heir, credentialId, StringComparison.Ordinal))
+            {
+                // The backend refuses this too; refusing here keeps the system prompt from coming up for nothing.
+                throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "The key set can't be handed to the passkey being removed.");
+            }
+            PasskeyHandoverChallenge challenge = await FromBackend(() => _backend.BeginKeySetHandoverAsync(credentialId, heir, token), token).ConfigureAwait(false);
+            if (challenge?.Options is null || string.IsNullOrWhiteSpace(challenge.HandoverId))
+            {
+                throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend returned no handover challenge.");
+            }
+            WebAuthnAssertionResponse? response = await _authenticator.AssertAsync(challenge.Options, token).ConfigureAwait(false);
+            if (response is null)
+            {
+                throw new PasskeyException(PasskeyErrorCategory.PlatformFailure, "The authenticator returned no assertion.");
+            }
+            PasskeySignOut signOut = await FromBackend(() => _backend.CompleteKeySetHandoverAsync(credentialId, challenge, response, token), token).ConfigureAwait(false);
+            return RequireSignOut(signOut);
         }, cancellationToken);
     }
 
@@ -300,6 +337,11 @@ public sealed class PasskeyClient : IPasskeyClient
         {
             throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "A credential id is required.");
         }
+    }
+
+    private static PasskeySignOut RequireSignOut(PasskeySignOut? signOut)
+    {
+        return signOut ?? throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend did not say whether the session ended.");
     }
 
     private static WebAuthnRegistrationResponse Require(WebAuthnRegistrationResponse? response)

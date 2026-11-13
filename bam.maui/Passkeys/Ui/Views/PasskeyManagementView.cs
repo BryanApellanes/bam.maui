@@ -78,6 +78,8 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
 
         Label warning = PasskeyViewParts.Body(nameof(PasskeyManagementViewModel.RemovalWarning), PasskeyResourceKeys.Text);
         PasskeyViewParts.ShowWhen(warning, nameof(PasskeyManagementViewModel.HasRemovalWarning));
+        Label accountKeyNote = PasskeyViewParts.Body(nameof(PasskeyManagementViewModel.RemovalAccountKeyNote), PasskeyResourceKeys.Text);
+        PasskeyViewParts.ShowWhen(accountKeyNote, nameof(PasskeyManagementViewModel.HasRemovalAccountKeyNote));
         Label removeTitle = PasskeyViewParts.Fixed(text.RemoveTitle, 20, PasskeyResourceKeys.Text);
         SemanticProperties.SetHeadingLevel(removeTitle, SemanticHeadingLevel.Level2);
         VerticalStackLayout removal = new VerticalStackLayout
@@ -88,12 +90,39 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
                 removeTitle,
                 PasskeyViewParts.Fixed(text.RemoveMessage),
                 warning,
+                accountKeyNote,
                 PasskeyViewParts.Primary(text.Remove, nameof(PasskeyManagementViewModel.ConfirmRemoveCommand)),
                 PasskeyViewParts.Link(text.Keep, nameof(PasskeyManagementViewModel.KeepCommand))
             }
         };
         PasskeyViewParts.ShowWhen(removal, nameof(PasskeyManagementViewModel.ShowsRemoval));
         screen.Children.Add(removal);
+
+        Label moveTitle = PasskeyViewParts.Fixed(text.MoveAccountKeyTitle, 20, PasskeyResourceKeys.Text);
+        SemanticProperties.SetHeadingLevel(moveTitle, SemanticHeadingLevel.Level2);
+        Picker heir = new Picker { Title = text.MoveAccountKeyTo, MinimumHeightRequest = PasskeyViewParts.MinimumTouchTarget, ItemDisplayBinding = new Binding(nameof(PasskeyItem.Title)) };
+        heir.SetBinding(Picker.ItemsSourceProperty, nameof(PasskeyManagementViewModel.HeirChoices));
+        heir.SetBinding(Picker.SelectedItemProperty, nameof(PasskeyManagementViewModel.SelectedHeir), BindingMode.TwoWay);
+        heir.SetDynamicResource(Picker.TextColorProperty, PasskeyResourceKeys.Text);
+        heir.SetDynamicResource(Picker.FontFamilyProperty, PasskeyResourceKeys.FontFamily);
+        SemanticProperties.SetDescription(heir, text.MoveAccountKeyTo);
+        VerticalStackLayout handover = new VerticalStackLayout
+        {
+            Spacing = 12,
+            Children =
+            {
+                moveTitle,
+                PasskeyViewParts.Fixed(text.MoveAccountKeyMessage),
+                PasskeyViewParts.Fixed(text.MoveAccountKeyTo, 14, PasskeyResourceKeys.Text),
+                heir,
+                PasskeyViewParts.Primary(text.MoveAccountKey, nameof(PasskeyManagementViewModel.MoveAccountKeyCommand)),
+                PasskeyViewParts.Fixed(text.RemoveWithoutMovingMessage),
+                PasskeyViewParts.Secondary(text.RemoveWithoutMoving, nameof(PasskeyManagementViewModel.RemoveWithoutMovingCommand)),
+                PasskeyViewParts.Link(text.Keep, nameof(PasskeyManagementViewModel.CancelHandoverCommand))
+            }
+        };
+        PasskeyViewParts.ShowWhen(handover, nameof(PasskeyManagementViewModel.ShowsHandover));
+        screen.Children.Add(handover);
 
         screen.Children.Add(PasskeyViewParts.Link(text.Refresh, nameof(PasskeyManagementViewModel.RefreshCommand)));
         screen.Children.Add(PasskeyViewParts.Secondary(text.SignOut, nameof(PasskeyManagementViewModel.SignOutCommand)));
@@ -126,6 +155,8 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
             title.FontAttributes = FontAttributes.Bold;
             Label current = PasskeyViewParts.Body(nameof(PasskeyItem.CurrentText), PasskeyResourceKeys.Primary);
             current.SetBinding(VisualElement.IsVisibleProperty, nameof(PasskeyItem.IsCurrent));
+            Label accountKey = PasskeyViewParts.Body(nameof(PasskeyItem.AccountKeyText), PasskeyResourceKeys.Primary);
+            accountKey.SetBinding(VisualElement.IsVisibleProperty, nameof(PasskeyItem.IsAccountKey));
             Label added = PasskeyViewParts.Body(nameof(PasskeyItem.AddedText));
             PasskeyViewParts.ShowWhen(added, nameof(PasskeyItem.HasAddedText));
             Label used = PasskeyViewParts.Body(nameof(PasskeyItem.LastUsedText));
@@ -145,7 +176,7 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
             {
                 Spacing = 4,
                 Padding = new Thickness(0, 8),
-                Children = { title, current, added, used, device, actions }
+                Children = { title, current, accountKey, added, used, device, actions }
             };
         }
     }

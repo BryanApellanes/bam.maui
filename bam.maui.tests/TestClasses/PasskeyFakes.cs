@@ -40,6 +40,11 @@ public sealed class FakePasskeyBackend : IPasskeyBackend
     public string? CompletedRegistrationJson { get; private set; }
     public string? DeletedCredentialId { get; private set; }
     public string? AddedName { get; private set; }
+    public PasskeyKeySetRemoval? DeletedKeySet { get; private set; }
+    public string? HandoverCredentialId { get; private set; }
+    public string? HandoverHeir { get; private set; }
+    public PasskeyHandoverChallenge? CompletedHandover { get; private set; }
+    public PasskeySignOut HandoverResult { get; set; } = new PasskeySignOut { SignedOut = false };
     public string AddedCredentialId { get; set; } = "added-1";
     public PasskeySignOut DeleteResult { get; set; } = new PasskeySignOut { SignedOut = false };
     public PasskeySignOut SignOutResult { get; set; } = new PasskeySignOut { SignedOut = true, NextUrl = "/account/signedout" };
@@ -103,11 +108,31 @@ public sealed class FakePasskeyBackend : IPasskeyBackend
         return Task.FromResult(credentials);
     }
 
-    public Task<PasskeySignOut> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
+    public Task<PasskeySignOut> DeletePasskeyAsync(string credentialId, PasskeyKeySetRemoval keySet, CancellationToken cancellationToken = default)
     {
         Enter("backend.deletePasskey");
         DeletedCredentialId = credentialId;
+        DeletedKeySet = keySet;
         return Task.FromResult(DeleteResult);
+    }
+
+    public Task<PasskeyHandoverChallenge> BeginKeySetHandoverAsync(string credentialId, string? heirCredentialId, CancellationToken cancellationToken = default)
+    {
+        Enter("backend.beginHandover");
+        HandoverCredentialId = credentialId;
+        HandoverHeir = heirCredentialId;
+        PasskeyHandoverChallenge challenge = ReturnNullOptions
+            ? null!
+            : new PasskeyHandoverChallenge { Options = new WebAuthnRequestOptions("{\"challenge\":\"handover\"}"), HandoverId = "handover-1" };
+        return Task.FromResult(challenge);
+    }
+
+    public Task<PasskeySignOut> CompleteKeySetHandoverAsync(string credentialId, PasskeyHandoverChallenge challenge, WebAuthnAssertionResponse response, CancellationToken cancellationToken = default)
+    {
+        Enter("backend.completeHandover");
+        CompletedHandover = challenge;
+        CompletedAssertionJson = response.Json;
+        return Task.FromResult(HandoverResult);
     }
 
     public Task RenamePasskeyAsync(string credentialId, string? name, CancellationToken cancellationToken = default)

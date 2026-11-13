@@ -64,7 +64,39 @@ public interface IPasskeyBackend
     /// <param name="credentialId">The credential id, as <see cref="PasskeyCredential.CredentialId"/> reported it.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>Whether removing it ended this session (it does when the session was opened with it).</returns>
-    Task<PasskeySignOut> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default);
+    Task<PasskeySignOut> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
+    {
+        return DeletePasskeyAsync(credentialId, PasskeyKeySetRemoval.Default, cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes one of the signed-in account's passkeys on the server, saying what happens to the key set when the
+    /// passkey holds it.  A backend that moves key sets refuses <see cref="PasskeyKeySetRemoval.Default"/> for that
+    /// passkey with a <see cref="PasskeyException"/> carrying its handover code (see <see cref="BeginKeySetHandoverAsync"/>).
+    /// </summary>
+    /// <param name="credentialId">The credential id, as <see cref="PasskeyCredential.CredentialId"/> reported it.</param>
+    /// <param name="keySet">What happens to the key set.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Whether removing it ended this session (it does when the session was opened with it).</returns>
+    Task<PasskeySignOut> DeletePasskeyAsync(string credentialId, PasskeyKeySetRemoval keySet, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Key-set handover: asks the server to move the key set off the passkey that holds it, which is then removed.
+    /// The server answers with assertion options for that passkey only.
+    /// </summary>
+    /// <param name="credentialId">The passkey that holds the key set and is being removed.</param>
+    /// <param name="heirCredentialId">The passkey to move the key set to, or null for the one this session signed in with.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The challenge to hand to the authenticator.</returns>
+    Task<PasskeyHandoverChallenge> BeginKeySetHandoverAsync(string credentialId, string? heirCredentialId, CancellationToken cancellationToken = default);
+
+    /// <summary>Key-set handover: submits the removed passkey's assertion; the server moves the key set and removes the passkey.</summary>
+    /// <param name="credentialId">The passkey being removed, as it was passed to <see cref="BeginKeySetHandoverAsync"/>.</param>
+    /// <param name="challenge">The challenge the assertion answers, exactly as <see cref="BeginKeySetHandoverAsync"/> returned it.</param>
+    /// <param name="response">The authenticator's assertion response.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Whether removing it ended this session (it does when the session was opened with it).</returns>
+    Task<PasskeySignOut> CompleteKeySetHandoverAsync(string credentialId, PasskeyHandoverChallenge challenge, WebAuthnAssertionResponse response, CancellationToken cancellationToken = default);
 
     /// <summary>Renames one of the signed-in account's passkeys.</summary>
     /// <param name="credentialId">The credential id, as <see cref="PasskeyCredential.CredentialId"/> reported it.</param>

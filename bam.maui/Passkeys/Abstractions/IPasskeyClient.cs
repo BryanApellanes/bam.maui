@@ -63,7 +63,33 @@ public interface IPasskeyClient
     /// <param name="credentialId">The credential to revoke.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>Once the backend has removed the credential: whether that ended this session (it does when the session was opened with it).</returns>
-    Task<PasskeyResult<PasskeySignOut>> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default);
+    Task<PasskeyResult<PasskeySignOut>> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
+    {
+        return DeletePasskeyAsync(credentialId, PasskeyKeySetRemoval.Default, cancellationToken);
+    }
+
+    /// <summary>
+    /// Revokes one of the signed-in account's passkeys on the backend, saying what happens to the key set when the
+    /// passkey holds it.  When the backend asks for a handover instead, the failure carries its code in
+    /// <see cref="PasskeyError.BackendCode"/> (<c>KeySetHandoverRequired</c> for the bam account endpoints): call
+    /// <see cref="HandOverKeySetAsync"/>, or remove it with <see cref="PasskeyKeySetRemoval.KeepKeySet"/>.
+    /// </summary>
+    /// <param name="credentialId">The credential to revoke.</param>
+    /// <param name="keySet">What happens to the key set.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Once the backend has removed the credential: whether that ended this session.</returns>
+    Task<PasskeyResult<PasskeySignOut>> DeletePasskeyAsync(string credentialId, PasskeyKeySetRemoval keySet, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Moves the account's key set off the passkey that holds it and removes that passkey.  The system prompt asks for
+    /// the passkey being removed (its device must be at hand, or reachable through the system's nearby-device option),
+    /// and the backend verifies it before anything changes.
+    /// </summary>
+    /// <param name="credentialId">The passkey that holds the key set.</param>
+    /// <param name="heirCredentialId">Another of the account's passkeys to hold the key set, or null for the one this session signed in with.</param>
+    /// <param name="cancellationToken">Cancels the ceremony.</param>
+    /// <returns>Once the key set has moved and the passkey is removed: whether that ended this session.</returns>
+    Task<PasskeyResult<PasskeySignOut>> HandOverKeySetAsync(string credentialId, string? heirCredentialId = null, CancellationToken cancellationToken = default);
 
     /// <summary>Renames one of the signed-in account's passkeys.</summary>
     /// <param name="credentialId">The credential to rename.</param>

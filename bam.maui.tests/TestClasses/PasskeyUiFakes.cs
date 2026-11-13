@@ -143,6 +143,13 @@ public sealed class ScriptedPasskeyClient : IPasskeyClient
     public string? RenamedId { get; private set; }
     public string? RenamedTo { get; private set; }
     public string? DeletedId { get; private set; }
+    /// <summary>What DeletePasskeyAsync returns, one per call, before falling back to DeleteResult.</summary>
+    public Queue<PasskeyResult<PasskeySignOut>> DeleteResults { get; } = new Queue<PasskeyResult<PasskeySignOut>>();
+    public PasskeyResult<PasskeySignOut> HandoverResult { get; set; } = PasskeyResult<PasskeySignOut>.Success(new PasskeySignOut { SignedOut = false });
+    /// <summary>What HandOverKeySetAsync returns, one per call, before falling back to HandoverResult.</summary>
+    public Queue<PasskeyResult<PasskeySignOut>> HandoverResults { get; } = new Queue<PasskeyResult<PasskeySignOut>>();
+    public string? HandoverId { get; private set; }
+    public string? HandoverHeir { get; private set; }
     public PasskeyProfile? SavedProfile { get; private set; }
 
     public static PasskeyCredential Phone { get; } = new PasskeyCredential { CredentialId = "phone", Name = "Phone", CreatedUtc = new DateTime(2026, 11, 1, 12, 0, 0, DateTimeKind.Utc), LastUsedUtc = new DateTime(2026, 11, 10, 12, 0, 0, DateTimeKind.Utc), IsCurrent = true, IsRegisteredKeySet = true };
@@ -215,12 +222,21 @@ public sealed class ScriptedPasskeyClient : IPasskeyClient
         return ListResults.Count > 1 ? ListResults.Dequeue() : ListResults.Peek();
     }
 
-    public async Task<PasskeyResult<PasskeySignOut>> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
+    public async Task<PasskeyResult<PasskeySignOut>> DeletePasskeyAsync(string credentialId, PasskeyKeySetRemoval keySet, CancellationToken cancellationToken = default)
     {
-        Calls.Add("delete");
+        Calls.Add(keySet == PasskeyKeySetRemoval.KeepKeySet ? "deleteKeepingKeySet" : "delete");
         DeletedId = credentialId;
         await WaitAsync(cancellationToken);
-        return DeleteResult;
+        return DeleteResults.Count > 0 ? DeleteResults.Dequeue() : DeleteResult;
+    }
+
+    public async Task<PasskeyResult<PasskeySignOut>> HandOverKeySetAsync(string credentialId, string? heirCredentialId = null, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("handover");
+        HandoverId = credentialId;
+        HandoverHeir = heirCredentialId;
+        await WaitAsync(cancellationToken);
+        return HandoverResults.Count > 0 ? HandoverResults.Dequeue() : HandoverResult;
     }
 
     public async Task<PasskeyResult> RenamePasskeyAsync(string credentialId, string? name, CancellationToken cancellationToken = default)

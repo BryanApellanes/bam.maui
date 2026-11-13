@@ -13,6 +13,11 @@ namespace Bam.Maui.Passkeys;
 /// clears the screen.  A session that has already ended (<see cref="PasskeyErrorCategory.NotSignedIn"/>) offers
 /// "sign in again".
 /// </para>
+/// <para>
+/// The passkey that holds the account key (the key set) is tagged.  When the backend won't remove it until the key has
+/// moved, the move panel opens: the person picks another passkey to hold the key and confirms with the one being removed
+/// (<see cref="IPasskeyClient.HandOverKeySetAsync"/>), or removes it without moving the key, for a lost device.
+/// </para>
 /// </summary>
 public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
 {
@@ -22,6 +27,9 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     private string _editName = string.Empty;
     private PasskeyItem? _pendingRemoval;
     private bool _signingOut;
+    private PasskeyItem? _pendingHandover;
+    private PasskeyItem? _selectedHeir;
+    private bool _reloadOnBack;
 
     /// <summary>Creates the view model.</summary>
     /// <param name="client">The passkey client.</param>
@@ -38,6 +46,9 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         CancelEditCommand = new PasskeyCommand(CancelEditAsync, () => _editing is not null);
         ConfirmRemoveCommand = new PasskeyCommand(ConfirmRemoveAsync, () => IsReady && _pendingRemoval is not null && _pendingRemoval.CanRemove);
         KeepCommand = new PasskeyCommand(KeepAsync, () => _pendingRemoval is not null);
+        MoveAccountKeyCommand = new PasskeyCommand(MoveAccountKeyAsync, () => IsReady && _pendingHandover is not null && _selectedHeir is not null);
+        RemoveWithoutMovingCommand = new PasskeyCommand(RemoveWithoutMovingAsync, () => IsReady && _pendingHandover is not null);
+        CancelHandoverCommand = new PasskeyCommand(CancelHandoverAsync, () => _pendingHandover is not null);
     }
 
     /// <inheritdoc />
@@ -72,7 +83,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     public bool ShowsEmptyState => IsReady && IsLoaded && Passkeys.Count == 0;
 
     /// <summary>Whether adding a passkey is offered: the list has loaded and nothing else is open.</summary>
-    public bool ShowsAdd => IsReady && IsLoaded && _editing is null && _pendingRemoval is null;
+    public bool ShowsAdd => IsReady && IsLoaded && _editing is null && _pendingRemoval is null && _pendingHandover is null;
 
     /// <summary>The name to give the next passkey added, or blank for none.</summary>
     public string NewPasskeyName
@@ -115,6 +126,8 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
             {
                 OnPropertyChanged(nameof(RemovalWarning));
                 OnPropertyChanged(nameof(HasRemovalWarning));
+                OnPropertyChanged(nameof(RemovalAccountKeyNote));
+                OnPropertyChanged(nameof(HasRemovalAccountKeyNote));
                 RaiseShows();
                 RaiseCommands();
             }
@@ -129,6 +142,57 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
 
     /// <summary>Whether <see cref="RemovalWarning"/> has text.</summary>
     public bool HasRemovalWarning => RemovalWarning.Length > 0;
+
+    /// <summary>The removal confirmation's extra line for the passkey that holds the account key, or empty.</summary>
+    public string RemovalAccountKeyNote => _pendingRemoval is { IsAccountKey: true } ? Text.RemoveAccountKeyMessage : string.Empty;
+
+    /// <summary>Whether <see cref="RemovalAccountKeyNote"/> has text.</summary>
+    public bool HasRemovalAccountKeyNote => RemovalAccountKeyNote.Length > 0;
+
+    /// <summary>
+    /// The passkey whose account key the move panel asks about, or null.  The panel opens when the backend refuses to
+    /// remove the passkey that holds the account key until the key has moved (bam.useraccounts#20).
+    /// </summary>
+    public PasskeyItem? PendingHandover
+    {
+        get => _pendingHandover;
+        private set
+        {
+            if (Set(ref _pendingHandover, value))
+            {
+                RaiseShows();
+                RaiseCommands();
+            }
+        }
+    }
+
+    /// <summary>Whether the move panel shows.</summary>
+    public bool ShowsHandover => IsReady && _pendingHandover is not null;
+
+    /// <summary>The passkeys the account key can move to: every listed one except the one being removed.</summary>
+    public ObservableCollection<PasskeyItem> HeirChoices { get; } = new ObservableCollection<PasskeyItem>();
+
+    /// <summary>The passkey the account key moves to.  It starts as the one this session signed in with, when that isn't the one being removed.</summary>
+    public PasskeyItem? SelectedHeir
+    {
+        get => _selectedHeir;
+        set
+        {
+            if (Set(ref _selectedHeir, value))
+            {
+                MoveAccountKeyCommand?.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    /// <summary>Moves the account key to <see cref="SelectedHeir"/> and removes the passkey: the system prompt asks for the passkey being removed.</summary>
+    public PasskeyCommand MoveAccountKeyCommand { get; }
+
+    /// <summary>Removes the passkey without moving the account key, which stays on record with no passkey holding it.</summary>
+    public PasskeyCommand RemoveWithoutMovingCommand { get; }
+
+    /// <summary>Closes the move panel without removing anything.</summary>
+    public PasskeyCommand CancelHandoverCommand { get; }
 
     /// <summary>Adds a passkey: the system prompt creates it, then the list loads again.</summary>
     public PasskeyCommand AddCommand { get; }
@@ -194,6 +258,9 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         CancelEditCommand?.RaiseCanExecuteChanged();
         ConfirmRemoveCommand?.RaiseCanExecuteChanged();
         KeepCommand?.RaiseCanExecuteChanged();
+        MoveAccountKeyCommand?.RaiseCanExecuteChanged();
+        RemoveWithoutMovingCommand?.RaiseCanExecuteChanged();
+        CancelHandoverCommand?.RaiseCanExecuteChanged();
         foreach (PasskeyItem item in Passkeys)
         {
             item.RenameCommand.RaiseCanExecuteChanged();
@@ -212,6 +279,8 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         }
         Editing = null;
         PendingRemoval = null;
+        CloseHandover();
+        _reloadOnBack = false;
         IsLoaded = true;
         Reset();
         RaiseShows();
@@ -248,12 +317,124 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
             return Task.CompletedTask;
         }
         PendingRemoval = null;
-        return RunAsync(async token => WithRemovalWording(await Client.DeletePasskeyAsync(item.CredentialId, token)), RemovedAsync, typedInput: true, workingText: Text.Updating);
+        return RunAsync(async token => Removal(await Client.DeletePasskeyAsync(item.CredentialId, PasskeyKeySetRemoval.Default, token)), removal =>
+        {
+            return removal.SignOut is null ? OpenHandoverAsync(item) : RemovedAsync(removal.SignOut);
+        }, typedInput: true, workingText: Text.Updating);
     }
 
     private Task RemovedAsync(PasskeySignOut signOut)
     {
         return signOut.SignedOut ? SignedOutAsync(signOut) : LoadAsync();
+    }
+
+    // The backend asked for the account key to move first: a refusal that opens the move panel, not an error screen.
+    private PasskeyResult<RemovalOutcome> Removal(PasskeyResult<PasskeySignOut> result)
+    {
+        if (result.Error is { BackendCode: HttpPasskeyBackend.BackendCodes.KeySetHandoverRequired })
+        {
+            return PasskeyResult<RemovalOutcome>.Success(new RemovalOutcome(null));
+        }
+        PasskeyResult<PasskeySignOut> worded = WithRemovalWording(result);
+        return worded.Succeeded ? PasskeyResult<RemovalOutcome>.Success(new RemovalOutcome(worded.Value!)) : PasskeyResult<RemovalOutcome>.Failure(worded.Error!);
+    }
+
+    private Task OpenHandoverAsync(PasskeyItem item)
+    {
+        Editing = null;
+        HeirChoices.Clear();
+        foreach (PasskeyItem passkey in Passkeys)
+        {
+            if (!string.Equals(passkey.CredentialId, item.CredentialId, StringComparison.Ordinal))
+            {
+                HeirChoices.Add(passkey);
+            }
+        }
+        SelectedHeir = HeirChoices.FirstOrDefault(passkey => passkey.IsCurrent) ?? HeirChoices.FirstOrDefault();
+        PendingHandover = item;
+        Reset();
+        RaiseShows();
+        return Task.CompletedTask;
+    }
+
+    // The heir is always named, even when it is this session's passkey: the backend's default would be the passkey being
+    // removed when this session signed in with it.  The panel stays open until the move works, so Back returns to it.
+    private Task MoveAccountKeyAsync()
+    {
+        PasskeyItem? item = _pendingHandover;
+        PasskeyItem? heir = _selectedHeir;
+        if (item is null || heir is null)
+        {
+            return Task.CompletedTask;
+        }
+        return RunAsync(async token => WithHandoverWording(await Client.HandOverKeySetAsync(item.CredentialId, heir.CredentialId, token)), RemovedAsync, typedInput: true);
+    }
+
+    private Task RemoveWithoutMovingAsync()
+    {
+        PasskeyItem? item = _pendingHandover;
+        if (item is null)
+        {
+            return Task.CompletedTask;
+        }
+        return RunAsync(async token => WithRemovalWording(await Client.DeletePasskeyAsync(item.CredentialId, PasskeyKeySetRemoval.KeepKeySet, token)), RemovedAsync, typedInput: true, workingText: Text.Updating);
+    }
+
+    private Task CancelHandoverAsync()
+    {
+        CloseHandover();
+        return Task.CompletedTask;
+    }
+
+    private void CloseHandover()
+    {
+        PendingHandover = null;
+        SelectedHeir = null;
+        HeirChoices.Clear();
+    }
+
+    /// <inheritdoc />
+    protected override Task AfterBackAsync()
+    {
+        if (!_reloadOnBack)
+        {
+            return Task.CompletedTask;
+        }
+        // The failure showed the list is out of date: Back goes to a fresh list, not to a panel about passkeys that changed.
+        _reloadOnBack = false;
+        CloseHandover();
+        return LoadAsync();
+    }
+
+    // A refused handover says what changed in the app's words.  A refused heir goes back to the panel to choose another;
+    // a list that changed underneath (a passkey removed elsewhere, the key set moved) is loaded again on Back.
+    private PasskeyResult<PasskeySignOut> WithHandoverWording(PasskeyResult<PasskeySignOut> result)
+    {
+        if (result.Error is not { BackendCode: not null } error)
+        {
+            return result;
+        }
+        string? message = null;
+        switch (error.BackendCode)
+        {
+            case HttpPasskeyBackend.BackendCodes.InvalidHeir:
+                message = Text.AccountKeyHeirRefusedMessage;
+                break;
+            case HttpPasskeyBackend.BackendCodes.LastCredential:
+            case HttpPasskeyBackend.BackendCodes.LastPasskey:
+                message = Text.LastPasskeyMessage;
+                _reloadOnBack = true;
+                break;
+            case HttpPasskeyBackend.BackendCodes.NotFound:
+            case HttpPasskeyBackend.BackendCodes.NotKeySet:
+            case HttpPasskeyBackend.BackendCodes.RotationUnavailable:
+            case HttpPasskeyBackend.BackendCodes.KeySetChanged:
+            case HttpPasskeyBackend.BackendCodes.HeirGone:
+                message = Text.PasskeysChangedMessage;
+                _reloadOnBack = true;
+                break;
+        }
+        return message is null ? result : PasskeyResult<PasskeySignOut>.Failure(new PasskeyError(error.Category, message, error.BackendCode));
     }
 
     // The person asked to leave, and the client forgets the session however the call ends (IPasskeyClient.SignOutAsync),
@@ -301,6 +482,8 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         EditName = string.Empty;
         Editing = null;
         PendingRemoval = null;
+        CloseHandover();
+        _reloadOnBack = false;
         IsLoaded = false;
         RaiseShows();
     }
@@ -308,6 +491,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     private void BeginRename(PasskeyItem item)
     {
         PendingRemoval = null;
+        CloseHandover();
         EditName = item.Name ?? string.Empty;
         Editing = item;
     }
@@ -315,6 +499,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     private void BeginRemoval(PasskeyItem item)
     {
         Editing = null;
+        CloseHandover();
         PendingRemoval = item;
     }
 
@@ -353,8 +538,12 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         OnPropertyChanged(nameof(ShowsAdd));
         OnPropertyChanged(nameof(ShowsEditor));
         OnPropertyChanged(nameof(ShowsRemoval));
+        OnPropertyChanged(nameof(ShowsHandover));
         OnPropertyChanged(nameof(ShowsSigningOut));
     }
+
+    // What a removal did: the sign-out it reported, or null when the backend asked for the account key to move first.
+    private sealed record RemovalOutcome(PasskeySignOut? SignOut);
 }
 
 /// <summary>One row of the management list: what the backend reported about a passkey, as the screen shows it.</summary>
@@ -371,6 +560,7 @@ public sealed class PasskeyItem
         LastUsedText = credential.LastUsedUtc is DateTime used ? PasskeyText.WithName(text.LastUsedOn, DateText(used)) : string.Empty;
         DeviceText = credential.Device ?? string.Empty;
         CurrentText = credential.IsCurrent == true ? text.CurrentPasskey : string.Empty;
+        AccountKeyText = credential.IsRegisteredKeySet == true ? text.AccountKeyPasskey : string.Empty;
         RenameCommand = new PasskeyCommand(() =>
         {
             rename(this);
@@ -418,6 +608,12 @@ public sealed class PasskeyItem
 
     /// <summary>Whether the session was opened with this passkey.</summary>
     public bool IsCurrent => Credential.IsCurrent == true;
+
+    /// <summary>The tag on the passkey that holds the account key (<see cref="PasskeyCredential.IsRegisteredKeySet"/>), or empty.</summary>
+    public string AccountKeyText { get; }
+
+    /// <summary>Whether this passkey holds the account key; shown only when the backend reported it.</summary>
+    public bool IsAccountKey => Credential.IsRegisteredKeySet == true;
 
     /// <summary>Whether it can be removed: not when it is the account's only passkey.</summary>
     public bool CanRemove { get; }
