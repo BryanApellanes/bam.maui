@@ -479,6 +479,16 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     private Task BackAsync()
     {
         Dismiss();
+        return AfterBackAsync();
+    }
+
+    /// <summary>
+    /// Runs after <see cref="BackCommand"/> has left the error screen, for a screen whose data the failure showed to be
+    /// out of date (the management screen loads its list again).  Does nothing by default.
+    /// </summary>
+    /// <returns>A task that completes when the screen has caught up.</returns>
+    protected virtual Task AfterBackAsync()
+    {
         return Task.CompletedTask;
     }
 

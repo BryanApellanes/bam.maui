@@ -176,6 +176,36 @@ public sealed class PasskeyText
     /// <summary>Shown when the server refuses to remove the account's only passkey.</summary>
     public string LastPasskeyMessage { get; set; } = "This is your only passkey. Add another one before you remove it.";
 
+    /// <summary>The tag on the passkey that holds the account key (the account's registered key set).</summary>
+    public string AccountKeyPasskey { get; set; } = "Account key";
+
+    /// <summary>The removal confirmation's extra line for the passkey that holds the account key.</summary>
+    public string RemoveAccountKeyMessage { get; set; } = "This passkey holds your account key.";
+
+    /// <summary>The heading of the panel that moves the account key before its passkey is removed.</summary>
+    public string MoveAccountKeyTitle { get; set; } = "Move your account key";
+
+    /// <summary>What moving the account key does.</summary>
+    public string MoveAccountKeyMessage { get; set; } = "Choose another of your passkeys to hold your account key. Then confirm with the passkey you're removing.";
+
+    /// <summary>The label of the choice of passkey to move the account key to.</summary>
+    public string MoveAccountKeyTo { get; set; } = "Move it to";
+
+    /// <summary>The button that moves the account key and removes the passkey.</summary>
+    public string MoveAccountKey { get; set; } = "Move key and remove";
+
+    /// <summary>The button that removes the passkey without moving the account key.</summary>
+    public string RemoveWithoutMoving { get; set; } = "Remove without moving";
+
+    /// <summary>What removing without moving does, shown beside <see cref="RemoveWithoutMoving"/>.</summary>
+    public string RemoveWithoutMovingMessage { get; set; } = "If you no longer have the device, remove it without moving. You can't sign in with it after that, but its key still counts as your account key until it is replaced, and you can't replace it here yet.";
+
+    /// <summary>Shown when the server refuses the passkey chosen to hold the account key.</summary>
+    public string AccountKeyHeirRefusedMessage { get; set; } = "That passkey can't hold your account key. Choose another one.";
+
+    /// <summary>Shown when the account's passkeys changed while the account key was being moved; Back loads the list again.</summary>
+    public string PasskeysChangedMessage { get; set; } = "Your passkeys changed while this was open. Check the list and try again.";
+
     /// <summary>The button that loads the list again.</summary>
     public string Refresh { get; set; } = "Refresh";
 

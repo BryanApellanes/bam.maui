@@ -242,11 +242,67 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task<PasskeySignOut> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
+    public Task<PasskeySignOut> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
+    {
+        return DeletePasskeyAsync(credentialId, PasskeyKeySetRemoval.Default, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PasskeySignOut> DeletePasskeyAsync(string credentialId, PasskeyKeySetRemoval keySet, CancellationToken cancellationToken = default)
     {
         RequireSendable(credentialId);
-        JsonElement root = await SendAsync(HttpMethod.Delete, Routes.Passkeys + "/" + credentialId, Routes.PasskeyById, null, cancellationToken).ConfigureAwait(false);
-        PasskeySignOut signOut = ReadSignOut(root, Routes.PasskeyById);
+        // The endpoints refuse to remove the key-set passkey without ?keySet=keep on a host that can move key sets
+        // (409 KeySetHandoverRequired), and ignore it everywhere it changes nothing.
+        string path = Routes.Passkeys + "/" + credentialId + (keySet == PasskeyKeySetRemoval.KeepKeySet ? "?keySet=keep" : string.Empty);
+        JsonElement root = await SendAsync(HttpMethod.Delete, path, Routes.PasskeyById, null, cancellationToken).ConfigureAwait(false);
+        return Ended(ReadSignOut(root, Routes.PasskeyById));
+    }
+
+    /// <inheritdoc />
+    public async Task<PasskeyHandoverChallenge> BeginKeySetHandoverAsync(string credentialId, string? heirCredentialId, CancellationToken cancellationToken = default)
+    {
+        RequireSendable(credentialId);
+        if (heirCredentialId is not null)
+        {
+            RequireSendable(heirCredentialId);
+        }
+        byte[] body = Body(writer =>
+        {
+            if (heirCredentialId is not null)
+            {
+                writer.WriteString("heir", heirCredentialId);
+            }
+        });
+        JsonElement root = await SendAsync(HttpMethod.Post, Routes.Passkeys + "/" + credentialId + "/handover/begin", Routes.HandoverBegin, body, cancellationToken).ConfigureAwait(false);
+        return new PasskeyHandoverChallenge
+        {
+            Options = new WebAuthnRequestOptions(RequiredObject(root, "options", Routes.HandoverBegin)),
+            HandoverId = RequiredString(root, "handoverId", Routes.HandoverBegin, MaxCeremonyIdLength)
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<PasskeySignOut> CompleteKeySetHandoverAsync(string credentialId, PasskeyHandoverChallenge challenge, WebAuthnAssertionResponse response, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(challenge);
+        ArgumentNullException.ThrowIfNull(response);
+        RequireSendable(credentialId);
+        if (string.IsNullOrWhiteSpace(challenge.HandoverId))
+        {
+            throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "The handover challenge has no handover id; the account endpoints always issue one at handover/begin.");
+        }
+        byte[] body = Body(writer =>
+        {
+            writer.WriteString("handoverId", challenge.HandoverId);
+            WriteCredential(writer, response.Json);
+        });
+        JsonElement root = await SendAsync(HttpMethod.Post, Routes.Passkeys + "/" + credentialId + "/handover/complete", Routes.HandoverComplete, body, cancellationToken).ConfigureAwait(false);
+        return Ended(ReadSignOut(root, Routes.HandoverComplete));
+    }
+
+    // A removal that ended the session (the session was opened with the removed passkey): the old cookie is never sent again.
+    private PasskeySignOut Ended(PasskeySignOut signOut)
+    {
         if (signOut.SignedOut)
         {
             _cookieJar?.Clear();
@@ -338,7 +394,19 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
             case BackendCodes.InviteRequired:
             case BackendCodes.NotFound:
             case BackendCodes.LastPasskey:
+            case BackendCodes.LastCredential:
+            case BackendCodes.KeySetHandoverRequired:
+            case BackendCodes.InvalidHeir:
+            case BackendCodes.NotKeySet:
+            case BackendCodes.RotationUnavailable:
+            case BackendCodes.KeySetChanged:
+            case BackendCodes.HeirGone:
+                // The account's passkeys aren't what the request assumed; the screen reads the code to say which.
                 return PasskeyErrorCategory.InvalidOptions;
+            case BackendCodes.HandoverExpired:
+                return PasskeyErrorCategory.ExpiredChallenge;
+            case BackendCodes.ProofRefused:
+                return PasskeyErrorCategory.ServerVerificationFailed;
             case BackendCodes.RequestRefused:
             case BackendCodes.SignInFailed:
             case BackendCodes.SignUpFailed:
@@ -698,6 +766,8 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         internal const string Passkeys = "passkeys";
         internal const string PasskeyById = "passkeys/{id}";
         internal const string PasskeyName = "passkeys/{id}/name";
+        internal const string HandoverBegin = "passkeys/{id}/handover/begin";
+        internal const string HandoverComplete = "passkeys/{id}/handover/complete";
         internal const string SignOut = "signout";
         internal const string Profile = "profile";
     }
@@ -720,5 +790,14 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         internal const string LastPasskey = "LastPasskey";
         internal const string RateLimited = "RateLimited";
         internal const string ProfileNotSaved = "ProfileNotSaved";
+        internal const string KeySetHandoverRequired = "KeySetHandoverRequired";
+        internal const string LastCredential = "LastCredential";
+        internal const string InvalidHeir = "InvalidHeir";
+        internal const string NotKeySet = "NotKeySet";
+        internal const string RotationUnavailable = "RotationUnavailable";
+        internal const string HandoverExpired = "HandoverExpired";
+        internal const string ProofRefused = "ProofRefused";
+        internal const string KeySetChanged = "KeySetChanged";
+        internal const string HeirGone = "HeirGone";
     }
 }
