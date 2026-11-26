@@ -148,7 +148,7 @@ public class PasskeySignInRecoveryShould : UnitTestMenuContainer
             Wait(screen.LoadAsync());
             string unlisted = screen.PendingRecoveryText;
 
-            FakeAccountEndpoints fake = new FakeAccountEndpoints().Respond(HttpStatusCode.TooManyRequests, "{\"error\":\"rateLimited\",\"message\":\"slow down\"}");
+            FakeAccountEndpoints fake = new FakeAccountEndpoints().Respond(HttpStatusCode.TooManyRequests, "{\"error\":\"RateLimited\",\"message\":\"slow down\"}");
             using HttpPasskeyBackend backend = HttpPasskeyBackend.Create(PasskeyClientFixture.ValidConfiguration(), null, fake);
             PasskeyErrorCategory? limited = null;
             try
@@ -169,6 +169,58 @@ public class PasskeySignInRecoveryShould : UnitTestMenuContainer
             because.ItsTrue("a heir named with braces is shown as typed, never expanded: " + outcome.Named, outcome.Named == text.PendingRecoveryMessage.Replace("{1}", date).Replace("{0}", "{1} {0}"));
             because.ItsTrue("a heir not in the list doesn't look like an ordinary passkey: " + outcome.Unlisted, outcome.Unlisted == text.PendingRecoveryMessage.Replace("{1}", date).Replace("{0}", text.UnlistedHeir));
             because.ItsTrue("a rate-limited cancel is rate limited", outcome.Limited == PasskeyErrorCategory.RateLimited);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    [UnitTest]
+    public void KeepAHeldSignInOnlyAsLongAsItsNotice()
+    {
+        After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
+        .When<ScriptedPasskeyClient>("stops Cancel the move while it runs; the page appears again; continues; then Bob signs in, the page appears, a sign-in fails and Back; then Ada cancels a move for real", (client, reg) =>
+        {
+            FakePasskeyNavigator navigator = new FakePasskeyNavigator();
+            PasskeySignInViewModel screen = new PasskeySignInViewModel(client, PasskeyClientFixture.ValidConfiguration(), navigator);
+            client.SignInResults.Enqueue(PasskeyResult<PasskeySignIn>.Success(new PasskeySignIn { Handle = "ada", PendingRecovery = Pending }));
+            Wait(screen.SignInCommand.ExecuteAsync());
+            string startable = screen.SignInCommand.CanExecute(null) + "|" + screen.ContinueCommand.CanExecute(null);
+
+            client.CancelRecoveryResult = PasskeyResult.Failure(ScriptedPasskeyClient.Error(PasskeyErrorCategory.UserCancelled));
+            Wait(screen.CancelRecoveryCommand.ExecuteAsync());
+            string stopped = screen.ShowsPendingRecovery + "|" + screen.IsReady + "|" + navigator.Joined;
+
+            Wait(screen.LoadAsync());
+            string appeared = screen.ShowsPendingRecovery + "|" + screen.IsReady + "|" + navigator.Joined;
+            Wait(screen.ContinueSignedInCommand.ExecuteAsync());
+            string continued = navigator.SignedIn?.Handle + "|" + screen.ShowsPendingRecovery;
+
+            client.SignInResults.Enqueue(PasskeyResult<PasskeySignIn>.Success(new PasskeySignIn { Handle = "bob" }));
+            Wait(screen.SignInCommand.ExecuteAsync());
+            Wait(screen.LoadAsync());
+            client.SignInResults.Enqueue(PasskeyResult<PasskeySignIn>.Failure(ScriptedPasskeyClient.Error(PasskeyErrorCategory.NetworkFailure)));
+            Wait(screen.SignInCommand.ExecuteAsync());
+            Wait(screen.BackCommand.ExecuteAsync());
+            string later = navigator.SignedIn?.Handle + "|" + screen.IsReady + "|" + screen.ShowsPendingRecovery + "|" + screen.ContinueSignedInCommand.CanExecute(null);
+
+            client.CancelRecoveryResult = PasskeyResult.Success();
+            client.SignInResults.Enqueue(PasskeyResult<PasskeySignIn>.Success(new PasskeySignIn { Handle = "ada", PendingRecovery = Pending }));
+            Wait(screen.SignInCommand.ExecuteAsync());
+            string during = string.Empty;
+            navigator.WhileSignedIn = () => during = screen.ShowsSigningIn + "|" + screen.ShowsPendingRecovery + "|" + screen.ContinueSignedInCommand.CanExecute(null);
+            Wait(screen.CancelRecoveryCommand.ExecuteAsync());
+            string cancelled = navigator.SignedIn?.Handle + "|" + (navigator.SignedIn?.PendingRecovery is null) + "|" + during;
+            return new LifetimeOutcome(startable, stopped, appeared, continued, later, cancelled);
+        })
+        .TheTest
+        .ShouldPass<LifetimeOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("no new sign-in starts while one is held: " + outcome.Startable, outcome.Startable == "False|False");
+            because.ItsTrue("stopping Cancel the move goes back to the notice, not the form, and hands nothing over: " + outcome.Stopped, outcome.Stopped == "True|False|");
+            because.ItsTrue("the page appearing again keeps the notice: " + outcome.Appeared, outcome.Appeared == "True|False|");
+            because.ItsTrue("and Continue still hands Ada over: " + outcome.Continued, outcome.Continued == "ada|False");
+            because.ItsTrue("after Bob's sign-in, a failure's Back is the form, with no older sign-in to hand over: " + outcome.Later, outcome.Later == "bob|True|False|False");
+            because.ItsTrue("a cancelled move hands over a sign-in with nothing waiting, showing \"opening your account\" meanwhile: " + outcome.Cancelled, outcome.Cancelled == "ada|True|True|False|False");
         })
         .SoBeHappy()
         .UnlessItFailed();
@@ -207,6 +259,8 @@ public class PasskeySignInRecoveryShould : UnitTestMenuContainer
     private sealed record HoldOutcome(HeldShot Held, string Continued, string Cancelled, string Navigated, string Calls);
 
     private sealed record CancelOutcome(string Gone, string GoneBack, string Offline, string Retried, HeldShot Elsewhere);
+
+    private sealed record LifetimeOutcome(string Startable, string Stopped, string Appeared, string Continued, string Later, string Cancelled);
 
     private sealed record TemplateOutcome(string Named, string Unlisted, PasskeyErrorCategory? Limited);
 }

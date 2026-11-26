@@ -227,17 +227,24 @@ public sealed class PasskeyText
     /// <summary>What the person can do when no passkey holds the account key.</summary>
     public string KeySetRecoverableMessage { get; set; } = "Choose one of your passkeys to take it over. The key moves after a waiting period, so there is time to cancel it if you didn't ask for it.";
 
+    /// <summary>
+    /// Shown when no passkey holds the account key and recovery can't take it over (<see cref="PasskeyList.KeySetUnrecoverable"/>),
+    /// and when such a recovery is refused: the server can't tell the key was a passkey's (a key set left from before removals
+    /// were recorded).  An operator can still restore it, so a white-label app can name its own support channel here.
+    /// </summary>
+    public string KeySetUnrecoverableMessage { get; set; } = "This account's key can't be recovered from this device. Contact support.";
+
     /// <summary>The heading of the notice about a recovery that is waiting.</summary>
     public string PendingRecoveryTitle { get; set; } = "Your account key is moving";
 
     /// <summary>The notice about a waiting recovery.  <c>{0}</c> is the passkey it moves to, <c>{1}</c> when.</summary>
-    public string PendingRecoveryMessage { get; set; } = "Your account key moves to {0} on {1}. Until then you can cancel it here or on any device you're signed in on. If you didn't start this, cancel it now.";
+    public string PendingRecoveryMessage { get; set; } = "Your account key moves to {0} on {1}. Until then you can cancel it here or on any device you're signed in on. If you didn't start this, cancel it and remove that passkey.";
 
     /// <summary>The sign-in screen's notice about a waiting recovery.  <c>{0}</c> is when the key moves.</summary>
-    public string SignInPendingRecoveryMessage { get; set; } = "Your account key is set to move to another of your passkeys on {0}. If you didn't start this, cancel it now.";
+    public string SignInPendingRecoveryMessage { get; set; } = "Your account key is set to move to another of your passkeys on {0}. If you didn't start this, cancel it and remove the passkey it moves to.";
 
     /// <summary>The sign-in notice's extra line when this app doesn't manage passkeys, so it can't cancel the move itself.</summary>
-    public string SignInPendingRecoveryElsewhereMessage { get; set; } = "If you didn't start this, cancel it where you manage your passkeys.";
+    public string SignInPendingRecoveryElsewhereMessage { get; set; } = "If you didn't start this, cancel it where you manage your passkeys, and remove the passkey it moves to.";
 
     /// <summary>The button on the sign-in notice that goes on into the app.</summary>
     public string ContinueSignedIn { get; set; } = "Continue";

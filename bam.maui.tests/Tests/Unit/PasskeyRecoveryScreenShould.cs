@@ -150,7 +150,7 @@ public class PasskeyRecoveryScreenShould : UnitTestMenuContainer
             RefusalShot heir = Refusal(screen);
             string heirBack = BackReloads(client, screen);
 
-            string[] reloading = { "RecoveryPending", "HeirGone", "KeySetChanged", "NotFound", "RotationUnavailable" };
+            string[] reloading = { "RecoveryPending", "HeirGone", "KeySetChanged", "NotFound", "NoKeySet", "RotationUnavailable" };
             List<string> reloads = new List<string>();
             foreach (string code in reloading)
             {
@@ -190,10 +190,58 @@ public class PasskeyRecoveryScreenShould : UnitTestMenuContainer
                 "HeirGone:" + text.PasskeysChangedMessage + ":1|False",
                 "KeySetChanged:" + text.PasskeysChangedMessage + ":1|False",
                 "NotFound:" + text.PasskeysChangedMessage + ":1|False",
+                "NoKeySet:" + text.PasskeysChangedMessage + ":1|False",
                 "RotationUnavailable:" + text.RecoveryUnavailableMessage + ":1|False");
             because.ItsTrue("each refusal that means the list is out of date says so and reloads on Back: " + outcome.Reloads, outcome.Reloads == expected);
             because.ItsTrue("cancelling a recovery that's gone says the list changed: " + outcome.Gone.Message, outcome.Gone.Failed && outcome.Gone.Message == text.PasskeysChangedMessage);
             because.ItsTrue("and Back loads it again, with no notice: " + outcome.GoneBack, outcome.GoneBack == "1|False|False");
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    [UnitTest]
+    public void SayAKeyWithNoRemovalRecordCantBeRecovered()
+    {
+        After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
+        .When<ScriptedPasskeyClient>("recovers a key no passkey holds, and the server has no record that a passkey held it; the list then says it can't be recovered; then claims both", (client, reg) =>
+        {
+            PasskeyManagementViewModel screen = Screen(client, new FakePasskeyNavigator());
+            client.KeySetRecoverable = true;
+            NextList(client, Phone, Tablet);
+            Wait(screen.LoadAsync());
+            Wait(screen.OpenRecoveryCommand.ExecuteAsync());
+            client.RecoveryResults.Enqueue(Refused("NoKeySet"));
+            Wait(screen.StartRecoveryCommand.ExecuteAsync());
+            RefusalShot refused = Refusal(screen);
+            string sent = client.RecoveryRemoves ?? "none";
+            client.KeySetRecoverable = false;
+            client.KeySetUnrecoverable = true;
+            NextList(client, Phone, Tablet);
+            string back = BackReloads(client, screen) + "|" + screen.ShowsRecoverable;
+            string notice = screen.ShowsUnrecoverable + "|" + screen.OpenRecoveryCommand.CanExecute(null);
+            client.KeySetRecoverable = true;
+            NextList(client, Phone, Tablet);
+            Wait(screen.LoadAsync());
+            string both = screen.ShowsUnrecoverable + "|" + screen.ShowsRecoverable;
+            client.KeySetRecoverable = false;
+            client.PendingRecovery = new PasskeyPendingRecovery { RecoveryId = "recovery-1", HeirCredentialId = "phone", EffectiveUtc = Effective };
+            NextList(client, Phone, Tablet);
+            Wait(screen.LoadAsync());
+            string waiting = screen.ShowsUnrecoverable + "|" + screen.ShowsPendingRecovery;
+            return new UnrecoverableOutcome(refused, sent, back, notice, both, waiting);
+        })
+        .TheTest
+        .ShouldPass<UnrecoverableOutcome>((because, outcome) =>
+        {
+            PasskeyText text = new PasskeyText();
+            because.ItsTrue("the recovery named no lost passkey: " + outcome.Sent, outcome.Sent == "none");
+            because.ItsTrue("so NoKeySet says the key can't be recovered here, not that the list changed: " + outcome.Refused.Message,
+                outcome.Refused.Failed && outcome.Refused.Message == text.KeySetUnrecoverableMessage && !outcome.Refused.TryAgain && outcome.Refused.Back);
+            because.ItsTrue("and Back loads the list again, without the offer: " + outcome.Back, outcome.Back == "1|False|False");
+            because.ItsTrue("a list that says the key can't be recovered shows that, with nothing to start: " + outcome.Notice, outcome.Notice == "True|False");
+            because.ItsTrue("a list that claims both is read as recoverable: " + outcome.Both, outcome.Both == "False|True");
+            because.ItsTrue("and a waiting recovery comes first: " + outcome.Waiting, outcome.Waiting == "False|True");
         })
         .SoBeHappy()
         .UnlessItFailed();
@@ -291,6 +339,8 @@ public class PasskeyRecoveryScreenShould : UnitTestMenuContainer
     private sealed record RecoverOutcome(string Offers, bool NoNotice, PanelShot Opened, string Sent, string Notice, string Blocked, bool PanelGone, string? CancelledId, bool NoticeAfter, string Calls);
 
     private sealed record OpenOutcome(bool LostOffered, string FromMove, string Closed, string Recoverable, PanelShot Unnamed, bool HiddenWhileOpen, string Sent, string? SignedOutTo, string Kept, bool PanelAfterKeep);
+
+    private sealed record UnrecoverableOutcome(RefusalShot Refused, string Sent, string Back, string Notice, string Both, string Waiting);
 
     private sealed record RefusedOutcome(RefusalShot TooNew, string TooNewBack, RefusalShot TooNewLater, RefusalShot Heir, string HeirBack, string Reloads, RefusalShot Gone, string GoneBack, string TooNewExpected);
 

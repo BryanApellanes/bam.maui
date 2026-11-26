@@ -249,7 +249,8 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         {
             Passkeys = credentials,
             PendingRecovery = ReadPendingRecovery(root, Routes.Passkeys),
-            KeySetRecoverable = OptionalBool(root, "keySetRecoverable", Routes.Passkeys) ?? false
+            KeySetRecoverable = OptionalBool(root, "keySetRecoverable", Routes.Passkeys) ?? false,
+            KeySetUnrecoverable = OptionalBool(root, "keySetUnrecoverable", Routes.Passkeys) ?? false
         };
     }
 

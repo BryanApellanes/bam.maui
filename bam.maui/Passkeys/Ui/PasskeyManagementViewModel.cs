@@ -39,6 +39,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     private bool _reloadOnBack;
     private PasskeyPendingRecovery? _pendingRecovery;
     private bool _keySetRecoverable;
+    private bool _keySetUnrecoverable;
     private bool _recoveryOpen;
     private PasskeyItem? _recoveryRemoves;
 
@@ -257,6 +258,12 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     /// <summary>Whether the screen offers a recovery because no passkey holds the account key.</summary>
     public bool ShowsRecoverable => IsReady && IsLoaded && _keySetRecoverable && _pendingRecovery is null && !_recoveryOpen && _pendingHandover is null;
 
+    /// <summary>
+    /// Whether the screen says the account key can't be recovered here (<see cref="PasskeyList.KeySetUnrecoverable"/>).  A list
+    /// that claims both is read as recoverable: offering the recovery costs nothing, and the server refuses it if it must.
+    /// </summary>
+    public bool ShowsUnrecoverable => IsReady && IsLoaded && _keySetUnrecoverable && !_keySetRecoverable && _pendingRecovery is null && !_recoveryOpen && _pendingHandover is null;
+
     /// <summary>Whether the recovery panel shows.</summary>
     public bool ShowsRecovery => IsReady && _recoveryOpen;
 
@@ -363,6 +370,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         CloseRecovery();
         _pendingRecovery = list.PendingRecovery;
         _keySetRecoverable = list.KeySetRecoverable;
+        _keySetUnrecoverable = list.KeySetUnrecoverable;
         OnPropertyChanged(nameof(PendingRecovery));
         OnPropertyChanged(nameof(PendingRecoveryText));
         _reloadOnBack = false;
@@ -497,7 +505,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
             return Task.CompletedTask;
         }
         string? removes = _recoveryRemoves?.CredentialId;
-        return RunAsync(async token => WithRecoveryWording(await Client.RecoverKeySetAsync(heir.CredentialId, removes, token)),
+        return RunAsync(async token => WithRecoveryWording(await Client.RecoverKeySetAsync(heir.CredentialId, removes, token), removes is null),
             started => started.SignOut.SignedOut ? SignedOutAsync(started.SignOut) : LoadAsync(), typedInput: true);
     }
 
@@ -550,8 +558,10 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     }
 
     // A refused recovery says why in the app's words.  A refused or too-new heir goes back to the panel to choose another;
-    // a recovery that can't start because things changed (or can't start here at all) loads the list again on Back.
-    private PasskeyResult<PasskeyRecoveryStarted> WithRecoveryWording(PasskeyResult<PasskeyRecoveryStarted> result)
+    // a recovery that can't start because things changed (or can't start here at all) loads the list again on Back.  With no
+    // lost passkey named, NoKeySet means the server has no record that a passkey held the key, so recovery can't take it over
+    // (bam.protocol#85, S3): the person needs support, not a reload.
+    private PasskeyResult<PasskeyRecoveryStarted> WithRecoveryWording(PasskeyResult<PasskeyRecoveryStarted> result, bool orphaned)
     {
         if (result.Error is not { BackendCode: not null } error)
         {
@@ -570,6 +580,8 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
             case HttpPasskeyBackend.BackendCodes.LastCredential:
             case HttpPasskeyBackend.BackendCodes.LastPasskey:
                 return Reworded(result, Text.LastPasskeyMessage, true);
+            case HttpPasskeyBackend.BackendCodes.NoKeySet when orphaned:
+                return Reworded(result, Text.KeySetUnrecoverableMessage, true);
             case HttpPasskeyBackend.BackendCodes.NotFound:
             case HttpPasskeyBackend.BackendCodes.NotKeySet:
             case HttpPasskeyBackend.BackendCodes.RemovesRequired:
@@ -744,6 +756,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         CloseRecovery();
         _pendingRecovery = null;
         _keySetRecoverable = false;
+        _keySetUnrecoverable = false;
         OnPropertyChanged(nameof(PendingRecovery));
         OnPropertyChanged(nameof(PendingRecoveryText));
         _reloadOnBack = false;
@@ -806,6 +819,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         OnPropertyChanged(nameof(ShowsHandover));
         OnPropertyChanged(nameof(ShowsPendingRecovery));
         OnPropertyChanged(nameof(ShowsRecoverable));
+        OnPropertyChanged(nameof(ShowsUnrecoverable));
         OnPropertyChanged(nameof(ShowsRecovery));
         OnPropertyChanged(nameof(ShowsSigningOut));
     }

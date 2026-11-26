@@ -104,22 +104,34 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
     /// <summary>Signs in the account named in <see cref="Handle"/>.</summary>
     public PasskeyCommand ContinueCommand { get; }
 
-    private bool CanStart => _passkeysAvailable && State != PasskeyViewState.Working;
+    // Nothing new starts while a sign-in is held: the person is signed in, and the notice is all the screen shows.
+    private bool CanStart => _passkeysAvailable && State != PasskeyViewState.Working && _held is null;
 
     /// <summary>
     /// Checks the device can do passkeys, without prompting.  Call it when the screen appears.  A device that can't
     /// shows the unavailable or device-setup screen in place of the form, with no Back (the buttons couldn't work); the
     /// device-setup screen's "try again" checks again.  Back from any later error (a link the app couldn't follow) returns
     /// to that screen, not the form, until a check succeeds.  A screen shown again after a
-    /// sign-in (a cached page the app returns to after sign-out) is back on the form.
+    /// sign-in (a cached page the app returns to after sign-out) is back on the form.  A screen shown again while it holds a
+    /// sign-in (a modal closed over the notice, a tab switch) keeps the notice: the person hasn't acted on it yet.
     /// </summary>
     /// <param name="cancellationToken">Cancels the probe.</param>
     /// <returns>A task that completes when the check is done.</returns>
     public async Task LoadAsync(CancellationToken cancellationToken = default)
     {
+        if (_held is not null)
+        {
+            if (State is PasskeyViewState.Succeeded or PasskeyViewState.Failed or PasskeyViewState.Working)
+            {
+                // The notice, a failed cancel (whose Back returns to it), or the cancel itself: nothing to check here.
+                RaiseCommands();
+                return;
+            }
+            // A hold with the form showing would let a later Back hand it over; it can't happen, but never keep one.
+            Hold(null);
+        }
         if (State == PasskeyViewState.Succeeded)
         {
-            Hold(null);
             Reset();
         }
         PasskeyCapabilities capabilities = await Client.GetCapabilitiesAsync(cancellationToken);
@@ -158,6 +170,11 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
     /// <inheritdoc />
     protected override PasskeyViewState DismissedState => _held is null ? PasskeyViewState.Ready : PasskeyViewState.Succeeded;
 
+    // Stopping "Cancel the move" while it runs returns to the notice too, not the form: the person is still signed in and
+    // hasn't acted on it.
+    /// <inheritdoc />
+    protected override PasskeyViewState QuietState => DismissedState;
+
     private Task SignInAsync()
     {
         return RunAsync(token => Client.AuthenticateAsync(token), SignedInAsync);
@@ -170,7 +187,8 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
     }
 
     // The app has moved on; the screen goes back to the form for when it is shown again.  A waiting recovery holds the
-    // hand-over until the person has seen it.
+    // hand-over until the person has seen it.  Each sign-in replaces any hold with its own answer, so an older one can
+    // never be handed over later.
     private async Task SignedInAsync(PasskeySignIn signIn)
     {
         if (signIn.PendingRecovery is not null)
@@ -178,6 +196,7 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
             Hold(signIn);
             return;
         }
+        Hold(null);
         await Navigator.SignedInAsync(signIn, PasskeyFlow.SignIn);
         Reset();
     }
@@ -207,7 +226,17 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
             return PasskeyResult<bool>.Failure(error.BackendCode == HttpPasskeyBackend.BackendCodes.NotFound
                 ? new PasskeyError(error.Category, Text.RecoveryGoneMessage, error.BackendCode)
                 : error);
-        }, _ => HandOverAsync(held), workingText: Text.Updating);
+        }, _ => CancelledAsync(held), workingText: Text.Updating);
+    }
+
+    // The move is cancelled, so the app gets a sign-in with nothing waiting, and the screen shows "opening your account",
+    // not the notice, while it takes over.  A navigation that fails then is an ordinary sign-in's: Try again hands over.
+    private async Task CancelledAsync(PasskeySignIn held)
+    {
+        PasskeySignIn cleared = held with { PendingRecovery = null };
+        Hold(null);
+        await Navigator.SignedInAsync(cleared, PasskeyFlow.SignIn);
+        Reset();
     }
 
     private async Task HandOverAsync(PasskeySignIn signIn)

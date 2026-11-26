@@ -26,7 +26,7 @@ public class KeySetRecoveryShould : UnitTestMenuContainer
             fake.Respond(HttpStatusCode.OK, "{\"handle\":\"ada\"}", SessionCookie)
                 .Respond(HttpStatusCode.OK, "{\"passkeys\":[{\"id\":\"BAUG\",\"name\":\"Laptop\"}],\"pendingRecovery\":{\"id\":\"cmVj\",\"removes\":\"AQID\",\"heir\":\"BAUG\",\"effectiveUtc\":\"2026-11-29T12:00:00Z\"},\"keySetRecoverable\":false}")
                 .Respond(HttpStatusCode.OK, "{\"passkeys\":[],\"pendingRecovery\":null,\"keySetRecoverable\":true}")
-                .Respond(HttpStatusCode.OK, "{\"passkeys\":[]}")
+                .Respond(HttpStatusCode.OK, "{\"passkeys\":[],\"keySetUnrecoverable\":true}")
                 .Respond(HttpStatusCode.OK, "{\"recoveryId\":\"cmVj\",\"options\":{\"challenge\":\"Y2g\",\"allowCredentials\":[{\"id\":\"BAUG\",\"type\":\"public-key\"}],\"userVerification\":\"required\"}}")
                 .Respond(HttpStatusCode.OK, "{\"recoveryId\":\"cmVk\",\"options\":{\"challenge\":\"Y2g\"}}")
                 .Respond(HttpStatusCode.Accepted, "{\"signedOut\":true,\"nextUrl\":\"/account/signedout\",\"effectiveUtc\":\"2026-11-29T12:00:00Z\"}")
@@ -47,8 +47,8 @@ public class KeySetRecoveryShould : UnitTestMenuContainer
             PasskeyPendingRecovery pending = waiting.PendingRecovery!;
             return new ContractOutcome(
                 pending.RecoveryId + "|" + pending.RemovedCredentialId + "|" + pending.HeirCredentialId + "|" + (pending.EffectiveUtc == Effective && pending.EffectiveUtc.Kind == DateTimeKind.Utc) + "|" + waiting.KeySetRecoverable + "|" + waiting.Passkeys.Count,
-                (recoverable.PendingRecovery is null) + "|" + recoverable.KeySetRecoverable,
-                (older.PendingRecovery is null) + "|" + older.KeySetRecoverable,
+                (recoverable.PendingRecovery is null) + "|" + recoverable.KeySetRecoverable + "|" + recoverable.KeySetUnrecoverable,
+                (older.PendingRecovery is null) + "|" + older.KeySetRecoverable + "|" + older.KeySetUnrecoverable,
                 requests[4].Method + " " + requests[4].Uri + " " + requests[4].Body,
                 requests[5].Body ?? "no body",
                 named.RecoveryId + "|" + named.Options.Json.Contains("allowCredentials", StringComparison.Ordinal) + "|" + heirOnly.RecoveryId,
@@ -64,8 +64,8 @@ public class KeySetRecoveryShould : UnitTestMenuContainer
         .ShouldPass<ContractOutcome>((because, outcome) =>
         {
             because.ItsTrue("a waiting recovery is read from the list: " + outcome.Waiting, outcome.Waiting == "cmVj|AQID|BAUG|True|False|1");
-            because.ItsTrue("a null one is nothing waiting, with recovery possible: " + outcome.Recoverable, outcome.Recoverable == "True|True");
-            because.ItsTrue("and a host that sends neither reports neither: " + outcome.Older, outcome.Older == "True|False");
+            because.ItsTrue("a null one is nothing waiting, with recovery possible and keySetUnrecoverable omitted: " + outcome.Recoverable, outcome.Recoverable == "True|True|False");
+            because.ItsTrue("an omitted pendingRecovery and keySetRecoverable read as nothing, and keySetUnrecoverable is read: " + outcome.Older, outcome.Older == "True|False|True");
             because.ItsTrue("begin posts the lost passkey and the heir: " + outcome.NamedBegin, outcome.NamedBegin == "POST https://example.com/account/keyset/recovery/begin {\"removes\":\"AQID\",\"heir\":\"BAUG\"}");
             because.ItsTrue("and only the heir when no passkey holds the key: " + outcome.HeirOnlyBody, outcome.HeirOnlyBody == "{\"heir\":\"BAUG\"}");
             because.ItsTrue("begin returns the recovery id and the options as sent: " + outcome.Challenges, outcome.Challenges == "cmVj|True|cmVk");
@@ -142,6 +142,7 @@ public class KeySetRecoveryShould : UnitTestMenuContainer
             Bad(wrong, "a pendingRecovery without an heir", "{\"passkeys\":[],\"pendingRecovery\":{\"id\":\"cmVj\",\"effectiveUtc\":\"2026-11-29T12:00:00Z\"}}", list, PasskeyErrorCategory.InvalidServerResponse, 1);
             Bad(wrong, "a pendingRecovery without a date", "{\"passkeys\":[],\"pendingRecovery\":{\"id\":\"cmVj\",\"heir\":\"BAUG\"}}", list, PasskeyErrorCategory.InvalidServerResponse, 1);
             Bad(wrong, "a keySetRecoverable that isn't true or false", "{\"passkeys\":[],\"keySetRecoverable\":\"yes\"}", list, PasskeyErrorCategory.InvalidServerResponse, 1);
+            Bad(wrong, "a keySetUnrecoverable that isn't true or false", "{\"passkeys\":[],\"keySetUnrecoverable\":1}", list, PasskeyErrorCategory.InvalidServerResponse, 1);
             Bad(wrong, "an unsafe lost passkey id", "{}", backend => backend.BeginKeySetRecoveryAsync("../signout", "BAUG"), PasskeyErrorCategory.InvalidOptions, 0);
             Bad(wrong, "an unsafe heir id", "{}", backend => backend.BeginKeySetRecoveryAsync(null, "a\"b"), PasskeyErrorCategory.InvalidOptions, 0);
             Bad(wrong, "an unsafe recovery id to cancel", "{}", backend => backend.CancelKeySetRecoveryAsync("../../signout"), PasskeyErrorCategory.InvalidOptions, 0);

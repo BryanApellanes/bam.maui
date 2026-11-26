@@ -155,6 +155,8 @@ public sealed class ScriptedPasskeyClient : IPasskeyClient
     public PasskeyPendingRecovery? PendingRecovery { get; set; }
     /// <summary>Whether GetPasskeyListAsync reports that a recovery can start.</summary>
     public bool KeySetRecoverable { get; set; }
+    /// <summary>Whether GetPasskeyListAsync reports that the key set can't be recovered.</summary>
+    public bool KeySetUnrecoverable { get; set; }
     /// <summary>What RecoverKeySetAsync returns, one per call, before falling back to RecoveryResult.</summary>
     public Queue<PasskeyResult<PasskeyRecoveryStarted>> RecoveryResults { get; } = new Queue<PasskeyResult<PasskeyRecoveryStarted>>();
     public PasskeyResult<PasskeyRecoveryStarted> RecoveryResult { get; set; } = PasskeyResult<PasskeyRecoveryStarted>.Success(new PasskeyRecoveryStarted { SignOut = new PasskeySignOut { SignedOut = false }, EffectiveUtc = new DateTime(2026, 11, 29, 12, 0, 0, DateTimeKind.Utc) });
@@ -237,7 +239,7 @@ public sealed class ScriptedPasskeyClient : IPasskeyClient
     {
         PasskeyResult<IReadOnlyList<PasskeyCredential>> listed = await GetRegisteredPasskeysAsync(cancellationToken);
         return listed.Succeeded
-            ? PasskeyResult<PasskeyList>.Success(new PasskeyList { Passkeys = listed.Value!, PendingRecovery = PendingRecovery, KeySetRecoverable = KeySetRecoverable })
+            ? PasskeyResult<PasskeyList>.Success(new PasskeyList { Passkeys = listed.Value!, PendingRecovery = PendingRecovery, KeySetRecoverable = KeySetRecoverable, KeySetUnrecoverable = KeySetUnrecoverable })
             : PasskeyResult<PasskeyList>.Failure(listed.Error!);
     }
 

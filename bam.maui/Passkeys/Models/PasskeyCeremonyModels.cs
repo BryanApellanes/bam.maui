@@ -122,6 +122,13 @@ public sealed record PasskeyList
 
     /// <summary>Whether a recovery can start because no passkey holds the key set (its passkey was removed without moving it).</summary>
     public bool KeySetRecoverable { get; init; }
+
+    /// <summary>
+    /// Whether the person has a key set that no passkey holds and that recovery can't take over: it wasn't a removed
+    /// passkey's recorded key, or this host can't recover.  Only an operator can restore it.  Never true together with
+    /// <see cref="KeySetRecoverable"/>, and false while a recovery waits or when there's no key set.
+    /// </summary>
+    public bool KeySetUnrecoverable { get; init; }
 }
 
 /// <summary>What a sign-out, or the removal of a passkey, did to the session.</summary>

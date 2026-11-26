@@ -20,6 +20,19 @@ Review round 1 (bam.maui#22), and bam.useraccounts#27's review changes
 - Tests pin that a heir's name is never read as a template placeholder, and that a rate-limited cancel is `RateLimited`.
 - 4 more unit tests: suite `pksr`.
 
+Review round 2 (bam.maui#22): a held sign-in lasts exactly as long as its notice
+- Stopping "Cancel the move" while it runs goes back to the notice, not the form (new `PasskeyFlowViewModel.QuietState`, where a quiet failure returns; the sign-in screen uses its `DismissedState`). Before this, the form came back with the hold still set, and a later failure's Back and Continue could hand the app that earlier sign-in, even after someone else had signed in.
+- No new sign-in starts while one is held, and each sign-in replaces the hold with its own answer.
+- `LoadAsync` while the notice shows (the page appearing again) keeps it, instead of dropping the person on the form, signed in without the app knowing.
+- A successful cancel hands the app a sign-in with `PendingRecovery` null, and shows "opening your account" while the app takes over.
+- 1 more unit test (`KeepAHeldSignInOnlyAsLongAsItsNotice`). The rate-limit test body now uses the server's `RateLimited` code.
+
+Removal records (bam.useraccounts#27 security fix S3; decision on bam.protocol#85)
+- A recovery that names no lost passkey works only when the server recorded that a removed passkey held the key. A key set left from before removals were recorded is refused with `NoKeySet`. The screen now says "This account's key can't be recovered from this device. Contact support." (`PasskeyText.KeySetUnrecoverableMessage`, which a white-label app can point at its own support) instead of "your passkeys changed". Back reloads the list. `NoKeySet` on a recovery that does name a lost passkey still means the list changed.
+- `PasskeyList.KeySetUnrecoverable` (wire `keySetUnrecoverable`, omitted when false): the person has a key set no passkey holds, and recovery can't take it over. The management screen shows the same heading as the recovery offer, with `KeySetUnrecoverableMessage` and nothing to press (`ShowsUnrecoverable`). A list that claims both is read as recoverable, and a waiting recovery comes first.
+- The waiting-recovery notices end "cancel it and remove that passkey" (on sign-in: "the passkey it moves to"), because cancelling alone doesn't stop someone who holds the heir.
+- 1 more unit test (`SayAKeyWithNoRemovalRecordCantBeRecovered`). `NoKeySet` is added to the refusal table, and the list-reader tests cover `keySetUnrecoverable`.
+
 Changed (breaking for other implementations of the interfaces)
 - `IPasskeyBackend` and `IPasskeyClient` have the recovery members above. `GetPasskeyListAsync` is a default interface method on both, wrapping the old list with no recovery state.
 - The management screen loads with `GetPasskeyListAsync`.

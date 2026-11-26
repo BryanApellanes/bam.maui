@@ -64,6 +64,21 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
         PasskeyViewParts.ShowWhen(recoverable, nameof(PasskeyManagementViewModel.ShowsRecoverable));
         screen.Children.Add(recoverable);
 
+        // Same heading, but nothing to press: only an operator can restore this key.
+        Label unrecoverableTitle = PasskeyViewParts.Fixed(text.KeySetRecoverableTitle, 20, PasskeyResourceKeys.Text);
+        SemanticProperties.SetHeadingLevel(unrecoverableTitle, SemanticHeadingLevel.Level2);
+        VerticalStackLayout unrecoverable = new VerticalStackLayout
+        {
+            Spacing = 12,
+            Children =
+            {
+                unrecoverableTitle,
+                PasskeyViewParts.Fixed(text.KeySetUnrecoverableMessage)
+            }
+        };
+        PasskeyViewParts.ShowWhen(unrecoverable, nameof(PasskeyManagementViewModel.ShowsUnrecoverable));
+        screen.Children.Add(unrecoverable);
+
         VerticalStackLayout list = new VerticalStackLayout { Spacing = 12 };
         BindableLayout.SetItemsSource(list, viewModel.Passkeys);
         BindableLayout.SetItemTemplate(list, new DataTemplate(Row));
