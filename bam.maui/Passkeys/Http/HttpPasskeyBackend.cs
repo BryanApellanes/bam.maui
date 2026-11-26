@@ -212,6 +212,13 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
     /// <inheritdoc />
     public async Task<IReadOnlyList<PasskeyCredential>> GetPasskeysAsync(CancellationToken cancellationToken = default)
     {
+        PasskeyList list = await GetPasskeyListAsync(cancellationToken).ConfigureAwait(false);
+        return list.Passkeys;
+    }
+
+    /// <inheritdoc />
+    public async Task<PasskeyList> GetPasskeyListAsync(CancellationToken cancellationToken = default)
+    {
         JsonElement root = await SendAsync(HttpMethod.Get, Routes.Passkeys, Routes.Passkeys, null, cancellationToken).ConfigureAwait(false);
         if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("passkeys", out JsonElement passkeys) || passkeys.ValueKind != JsonValueKind.Array)
         {
@@ -238,7 +245,37 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
                 IsRegisteredKeySet = OptionalBool(passkey, "registeredKeySet", Routes.Passkeys)
             });
         }
-        return credentials;
+        return new PasskeyList
+        {
+            Passkeys = credentials,
+            PendingRecovery = ReadPendingRecovery(root),
+            KeySetRecoverable = OptionalBool(root, "keySetRecoverable", Routes.Passkeys) ?? false
+        };
+    }
+
+    // A waiting recovery, null or absent when nothing waits.  Its id goes into the cancel path, so it must be base64url.
+    private static PasskeyPendingRecovery? ReadPendingRecovery(JsonElement root)
+    {
+        if (!root.TryGetProperty("pendingRecovery", out JsonElement pending) || pending.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+        if (pending.ValueKind != JsonValueKind.Object)
+        {
+            throw Invalid(Routes.Passkeys, "has a pendingRecovery that is not an object");
+        }
+        string recoveryId = RequiredString(pending, "id", Routes.Passkeys, MaxCeremonyIdLength);
+        if (!IsBase64Url(recoveryId))
+        {
+            throw Invalid(Routes.Passkeys, "has an unusable pendingRecovery id");
+        }
+        return new PasskeyPendingRecovery
+        {
+            RecoveryId = recoveryId,
+            RemovedCredentialId = OptionalString(pending, "removes", Routes.Passkeys),
+            HeirCredentialId = RequiredString(pending, "heir", Routes.Passkeys, MaxCredentialIdLength),
+            EffectiveUtc = RequiredDate(pending, "effectiveUtc", Routes.Passkeys)
+        };
     }
 
     /// <inheritdoc />
@@ -298,6 +335,67 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         });
         JsonElement root = await SendAsync(HttpMethod.Post, Routes.Passkeys + "/" + credentialId + "/handover/complete", Routes.HandoverComplete, body, cancellationToken).ConfigureAwait(false);
         return Ended(ReadSignOut(root, Routes.HandoverComplete));
+    }
+
+    /// <inheritdoc />
+    public async Task<PasskeyRecoveryChallenge> BeginKeySetRecoveryAsync(string? removedCredentialId, string? heirCredentialId, CancellationToken cancellationToken = default)
+    {
+        if (removedCredentialId is not null)
+        {
+            RequireSendable(removedCredentialId);
+        }
+        if (heirCredentialId is not null)
+        {
+            RequireSendable(heirCredentialId);
+        }
+        byte[] body = Body(writer =>
+        {
+            if (removedCredentialId is not null)
+            {
+                writer.WriteString("removes", removedCredentialId);
+            }
+            if (heirCredentialId is not null)
+            {
+                writer.WriteString("heir", heirCredentialId);
+            }
+        });
+        JsonElement root = await SendAsync(HttpMethod.Post, Routes.RecoveryBegin, Routes.RecoveryBegin, body, cancellationToken).ConfigureAwait(false);
+        return new PasskeyRecoveryChallenge
+        {
+            Options = new WebAuthnRequestOptions(RequiredObject(root, "options", Routes.RecoveryBegin)),
+            RecoveryId = RequiredString(root, "recoveryId", Routes.RecoveryBegin, MaxCeremonyIdLength)
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<PasskeyRecoveryStarted> CompleteKeySetRecoveryAsync(PasskeyRecoveryChallenge challenge, WebAuthnAssertionResponse response, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(challenge);
+        ArgumentNullException.ThrowIfNull(response);
+        if (string.IsNullOrWhiteSpace(challenge.RecoveryId))
+        {
+            throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "The recovery challenge has no recovery id; the account endpoints always issue one at keyset/recovery/begin.");
+        }
+        byte[] body = Body(writer =>
+        {
+            writer.WriteString("recoveryId", challenge.RecoveryId);
+            WriteCredential(writer, response.Json);
+        });
+        JsonElement root = await SendAsync(HttpMethod.Post, Routes.RecoveryComplete, Routes.RecoveryComplete, body, cancellationToken).ConfigureAwait(false);
+        PasskeySignOut signOut = ReadSignOut(root, Routes.RecoveryComplete);
+        DateTime effectiveUtc = RequiredDate(root, "effectiveUtc", Routes.RecoveryComplete);
+        return new PasskeyRecoveryStarted { SignOut = Ended(signOut), EffectiveUtc = effectiveUtc };
+    }
+
+    /// <inheritdoc />
+    public async Task CancelKeySetRecoveryAsync(string recoveryId, CancellationToken cancellationToken = default)
+    {
+        if (!IsBase64Url(recoveryId) || recoveryId.Length > MaxCeremonyIdLength)
+        {
+            throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "The recovery id is not base64url, so it was not sent.");
+        }
+        byte[] body = Body(_ => { });
+        await SendAsync(HttpMethod.Post, "keyset/recovery/" + recoveryId + "/cancel", Routes.RecoveryCancel, body, cancellationToken).ConfigureAwait(false);
     }
 
     // A removal that ended the session (the session was opened with the removed passkey): the old cookie is never sent again.
@@ -401,6 +499,10 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
             case BackendCodes.RotationUnavailable:
             case BackendCodes.KeySetChanged:
             case BackendCodes.HeirGone:
+            case BackendCodes.RemovesRequired:
+            case BackendCodes.HeirTooNew:
+            case BackendCodes.RecoveryPending:
+            case BackendCodes.NoKeySet:
                 // The account's passkeys aren't what the request assumed; the screen reads the code to say which.
                 return PasskeyErrorCategory.InvalidOptions;
             case BackendCodes.HandoverExpired:
@@ -523,7 +625,8 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         {
             string? backendCode = BackendCodeOf(payload);
             PasskeyErrorCategory category = CategoryFor(response.StatusCode, backendCode);
-            throw new PasskeyException(category, $"The account endpoint {route} refused the request: HTTP {(int)response.StatusCode}, code {backendCode ?? "none"}.", null, backendCode);
+            DateTime? eligibleUtc = backendCode == BackendCodes.HeirTooNew ? EligibleOf(payload) : null;
+            throw new PasskeyException(category, $"The account endpoint {route} refused the request: HTTP {(int)response.StatusCode}, code {backendCode ?? "none"}.", null, backendCode, eligibleUtc);
         }
         if (payload.Length == 0)
         {
@@ -603,6 +706,27 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
                 }
             }
             return code;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    // When a HeirTooNew refusal says the heir becomes old enough; anything that isn't a date is ignored, not an error.
+    private static DateTime? EligibleOf(byte[] payload)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(payload);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("eligibleUtc", out JsonElement eligible)
+                || eligible.ValueKind != JsonValueKind.String
+                || !eligible.TryGetDateTime(out DateTime date))
+            {
+                return null;
+            }
+            return date.Kind == DateTimeKind.Local ? date.ToUniversalTime() : DateTime.SpecifyKind(date, DateTimeKind.Utc);
         }
         catch (JsonException)
         {
@@ -706,6 +830,11 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         return date.Kind == DateTimeKind.Local ? date.ToUniversalTime() : DateTime.SpecifyKind(date, DateTimeKind.Utc);
     }
 
+    private static DateTime RequiredDate(JsonElement root, string name, string route)
+    {
+        return OptionalDate(root, name, route) ?? throw Invalid(route, "has no " + name);
+    }
+
     private static PasskeyException Invalid(string route, string what)
     {
         return new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, $"The account endpoint {route} response {what}.");
@@ -768,6 +897,9 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         internal const string PasskeyName = "passkeys/{id}/name";
         internal const string HandoverBegin = "passkeys/{id}/handover/begin";
         internal const string HandoverComplete = "passkeys/{id}/handover/complete";
+        internal const string RecoveryBegin = "keyset/recovery/begin";
+        internal const string RecoveryComplete = "keyset/recovery/complete";
+        internal const string RecoveryCancel = "keyset/recovery/{id}/cancel";
         internal const string SignOut = "signout";
         internal const string Profile = "profile";
     }
@@ -799,5 +931,9 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         internal const string ProofRefused = "ProofRefused";
         internal const string KeySetChanged = "KeySetChanged";
         internal const string HeirGone = "HeirGone";
+        internal const string RemovesRequired = "RemovesRequired";
+        internal const string HeirTooNew = "HeirTooNew";
+        internal const string RecoveryPending = "RecoveryPending";
+        internal const string NoKeySet = "NoKeySet";
     }
 }

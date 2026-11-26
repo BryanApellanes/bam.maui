@@ -102,6 +102,22 @@ public sealed record PasskeyCredential
     public bool? IsRegisteredKeySet { get; init; }
 }
 
+/// <summary>
+/// The signed-in account's passkeys, with the state of its key set: a lost-device recovery that is waiting, and whether
+/// one can start.  A backend that can't recover key sets reports neither.
+/// </summary>
+public sealed record PasskeyList
+{
+    /// <summary>The registered passkeys, oldest first.</summary>
+    public IReadOnlyList<PasskeyCredential> Passkeys { get; init; } = Array.Empty<PasskeyCredential>();
+
+    /// <summary>The waiting recovery, or null.</summary>
+    public PasskeyPendingRecovery? PendingRecovery { get; init; }
+
+    /// <summary>Whether a recovery can start because no passkey holds the key set (its passkey was removed without moving it).</summary>
+    public bool KeySetRecoverable { get; init; }
+}
+
 /// <summary>What a sign-out, or the removal of a passkey, did to the session.</summary>
 public sealed record PasskeySignOut
 {

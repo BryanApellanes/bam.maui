@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Key-set recovery (bam.maui#20, against bam.useraccounts#27)
+
+Added
+- `IPasskeyClient.RecoverKeySetAsync(heirId, lostId?)`: recovers the account's key set when the passkey that holds it is lost. The backend issues assertion options for the heir only, the system prompt runs them, and the backend starts a recovery that takes effect after its waiting period (`PasskeyRecoveryStarted.EffectiveUtc`). The heir is always named, since the backend's default (this session's passkey) may be the lost one. Gated on `EnableManagement`; refuses a missing heir, or a heir that is the lost passkey, before asking anyone.
+- `IPasskeyClient.CancelKeySetRecoveryAsync(recoveryId)` and `GetPasskeyListAsync()`, which returns `PasskeyList`: the passkeys, `PendingRecovery` and `KeySetRecoverable`.
+- `IPasskeyBackend.BeginKeySetRecoveryAsync`, `CompleteKeySetRecoveryAsync`, `CancelKeySetRecoveryAsync` and `GetPasskeyListAsync`, with `PasskeyRecoveryChallenge`, `PasskeyRecoveryStarted` and `PasskeyPendingRecovery`. `HttpPasskeyBackend` posts `keyset/recovery/begin`, `.../complete` and `keyset/recovery/{id}/cancel`, reads `pendingRecovery` and `keySetRecoverable` from the list, refuses a recovery id that isn't base64url before putting it in a path, maps `RemovesRequired`, `HeirTooNew`, `RecoveryPending` and `NoKeySet` to `InvalidOptions`, and clears its cookie jar when a recovery ends the session.
+- `PasskeyError.EligibleUtc` and `PasskeyException.EligibleUtc`: when a `HeirTooNew` refusal says from when the heir can take over. Anything else in the field is dropped, not an error.
+- The management screen: "This device is lost" on the account-key row and in the move panel, a "Recover your account key" panel (`ShowsRecovery`, `RecoveryRemoves`, `StartRecoveryCommand`, `RemoveLostWithoutMovingCommand`, `CloseRecoveryCommand`), the waiting-recovery notice (`ShowsPendingRecovery`, `PendingRecoveryText`, `CancelRecoveryCommand`), and the offer when no passkey holds the key (`ShowsRecoverable`, `OpenRecoveryCommand`). Each refusal is worded on `PasskeyText`; one that shows the list changed reloads it on Back. A handover refused with `RecoveryPending` says a move is waiting.
+- 9 unit tests: suites `pkkr` and `pkrs`.
+
+Changed (breaking for other implementations of the interfaces)
+- `IPasskeyBackend` and `IPasskeyClient` have the recovery members above. `GetPasskeyListAsync` is a default interface method on both, wrapping the old list with no recovery state.
+- The management screen loads with `GetPasskeyListAsync`.
+- `PasskeyText.RemoveWithoutMovingMessage` points at "This device is lost" first.
+
 ### Key-set handover (bam.maui#7, against bam.useraccounts#20)
 
 Added
@@ -23,7 +38,7 @@ Changed (breaking for other implementations of the interfaces)
 - `IPasskeyBackend` and `IPasskeyClient` have the new members above. The old `DeletePasskeyAsync(id)` stays, as a default interface method that calls the new overload with `PasskeyKeySetRemoval.Default`.
 
 Not yet
-- The lost-device recovery (`keyset/recovery/*`, `pendingRecovery`, `keySetRecoverable`; contract on bam.maui#7) waits for its bam.useraccounts PR.
+- The lost-device recovery: done in bam.maui#20, above.
 
 ### Phase 5: passkey management (bam.maui#18)
 

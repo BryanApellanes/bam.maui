@@ -16,7 +16,14 @@ namespace Bam.Maui.Passkeys;
 /// <para>
 /// The passkey that holds the account key (the key set) is tagged.  When the backend won't remove it until the key has
 /// moved, the move panel opens: the person picks another passkey to hold the key and confirms with the one being removed
-/// (<see cref="IPasskeyClient.HandOverKeySetAsync"/>), or removes it without moving the key, for a lost device.
+/// (<see cref="IPasskeyClient.HandOverKeySetAsync"/>), or removes it without moving the key.
+/// </para>
+/// <para>
+/// For a lost device, "This device is lost" (on the account-key row and in the move panel) opens the recovery panel: the
+/// person picks a passkey on this device to take over the key and confirms with it (<see cref="IPasskeyClient.RecoverKeySetAsync"/>).
+/// The lost passkey stops signing in at once and the key moves after the backend's waiting period.  When no passkey holds
+/// the key (<see cref="PasskeyList.KeySetRecoverable"/>) the screen offers the same recovery on its own.  A waiting recovery
+/// shows a notice with its date and a Cancel, on every device the person is signed in on.
 /// </para>
 /// </summary>
 public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
@@ -30,6 +37,10 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     private PasskeyItem? _pendingHandover;
     private PasskeyItem? _selectedHeir;
     private bool _reloadOnBack;
+    private PasskeyPendingRecovery? _pendingRecovery;
+    private bool _keySetRecoverable;
+    private bool _recoveryOpen;
+    private PasskeyItem? _recoveryRemoves;
 
     /// <summary>Creates the view model.</summary>
     /// <param name="client">The passkey client.</param>
@@ -49,6 +60,12 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         MoveAccountKeyCommand = new PasskeyCommand(MoveAccountKeyAsync, () => IsReady && _pendingHandover is not null && _selectedHeir is not null);
         RemoveWithoutMovingCommand = new PasskeyCommand(RemoveWithoutMovingAsync, () => IsReady && _pendingHandover is not null);
         CancelHandoverCommand = new PasskeyCommand(CancelHandoverAsync, () => _pendingHandover is not null);
+        LostDeviceCommand = new PasskeyCommand(LostDeviceAsync, () => IsReady && _pendingHandover is not null && _pendingRecovery is null);
+        OpenRecoveryCommand = new PasskeyCommand(() => OpenRecoveryAsync(null), () => IsReady && _loaded && _keySetRecoverable && _pendingRecovery is null);
+        StartRecoveryCommand = new PasskeyCommand(StartRecoveryAsync, () => IsReady && _recoveryOpen && _selectedHeir is not null);
+        RemoveLostWithoutMovingCommand = new PasskeyCommand(RemoveLostWithoutMovingAsync, () => IsReady && _recoveryOpen && _recoveryRemoves is not null);
+        CloseRecoveryCommand = new PasskeyCommand(CloseRecoveryAsync, () => _recoveryOpen);
+        CancelRecoveryCommand = new PasskeyCommand(CancelRecoveryAsync, () => IsReady && _pendingRecovery is not null);
     }
 
     /// <inheritdoc />
@@ -83,7 +100,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     public bool ShowsEmptyState => IsReady && IsLoaded && Passkeys.Count == 0;
 
     /// <summary>Whether adding a passkey is offered: the list has loaded and nothing else is open.</summary>
-    public bool ShowsAdd => IsReady && IsLoaded && _editing is null && _pendingRemoval is null && _pendingHandover is null;
+    public bool ShowsAdd => IsReady && IsLoaded && _editing is null && _pendingRemoval is null && _pendingHandover is null && !_recoveryOpen;
 
     /// <summary>The name to give the next passkey added, or blank for none.</summary>
     public string NewPasskeyName
@@ -169,7 +186,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     /// <summary>Whether the move panel shows.</summary>
     public bool ShowsHandover => IsReady && _pendingHandover is not null;
 
-    /// <summary>The passkeys the account key can move to: every listed one except the one being removed.</summary>
+    /// <summary>The passkeys the account key can move to, in the move panel or the recovery panel: every listed one except the one being removed.</summary>
     public ObservableCollection<PasskeyItem> HeirChoices { get; } = new ObservableCollection<PasskeyItem>();
 
     /// <summary>
@@ -184,6 +201,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
             if (Set(ref _selectedHeir, value))
             {
                 MoveAccountKeyCommand?.RaiseCanExecuteChanged();
+                StartRecoveryCommand?.RaiseCanExecuteChanged();
             }
         }
     }
@@ -191,11 +209,62 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     /// <summary>Moves the account key to <see cref="SelectedHeir"/> and removes the passkey: the system prompt asks for the passkey being removed.</summary>
     public PasskeyCommand MoveAccountKeyCommand { get; }
 
-    /// <summary>Removes the passkey without moving the account key, which stays on record with no passkey holding it.</summary>
+    /// <summary>Removes the passkey without moving the account key: its key still counts as the account key until it is replaced.</summary>
     public PasskeyCommand RemoveWithoutMovingCommand { get; }
 
     /// <summary>Closes the move panel without removing anything.</summary>
     public PasskeyCommand CancelHandoverCommand { get; }
+
+    /// <summary>From the move panel: the passkey's device is lost, so open the recovery panel for it instead.</summary>
+    public PasskeyCommand LostDeviceCommand { get; }
+
+    /// <summary>Opens the recovery panel when no passkey holds the account key (<see cref="ShowsRecoverable"/>).</summary>
+    public PasskeyCommand OpenRecoveryCommand { get; }
+
+    /// <summary>Starts the recovery to <see cref="SelectedHeir"/>: the system prompt asks for that passkey.</summary>
+    public PasskeyCommand StartRecoveryCommand { get; }
+
+    /// <summary>From the recovery panel: removes the lost passkey without moving the account key.</summary>
+    public PasskeyCommand RemoveLostWithoutMovingCommand { get; }
+
+    /// <summary>Closes the recovery panel without starting anything.</summary>
+    public PasskeyCommand CloseRecoveryCommand { get; }
+
+    /// <summary>Cancels the waiting recovery (<see cref="PendingRecovery"/>).</summary>
+    public PasskeyCommand CancelRecoveryCommand { get; }
+
+    /// <summary>The waiting lost-device recovery the backend reported, or null.</summary>
+    public PasskeyPendingRecovery? PendingRecovery => _pendingRecovery;
+
+    /// <summary>Whether the notice about a waiting recovery shows.</summary>
+    public bool ShowsPendingRecovery => IsReady && IsLoaded && _pendingRecovery is not null;
+
+    /// <summary>The notice about a waiting recovery: the passkey the key moves to and when, or empty.</summary>
+    public string PendingRecoveryText
+    {
+        get
+        {
+            if (_pendingRecovery is not { } pending)
+            {
+                return string.Empty;
+            }
+            string heir = Passkeys.FirstOrDefault(item => string.Equals(item.CredentialId, pending.HeirCredentialId, StringComparison.Ordinal))?.Title ?? Text.UnnamedPasskey;
+            // {1} first: the date has no braces, and the passkey's name, which the person chose, is never scanned again.
+            return PasskeyText.WithName(Text.PendingRecoveryMessage.Replace("{1}", MomentText(pending.EffectiveUtc), StringComparison.Ordinal), heir);
+        }
+    }
+
+    /// <summary>Whether the screen offers a recovery because no passkey holds the account key.</summary>
+    public bool ShowsRecoverable => IsReady && IsLoaded && _keySetRecoverable && _pendingRecovery is null && !_recoveryOpen && _pendingHandover is null;
+
+    /// <summary>Whether the recovery panel shows.</summary>
+    public bool ShowsRecovery => IsReady && _recoveryOpen;
+
+    /// <summary>The lost passkey the recovery panel takes out of sign-in, or null when no passkey holds the key.</summary>
+    public PasskeyItem? RecoveryRemoves => _recoveryRemoves;
+
+    /// <summary>Whether the recovery panel names a lost passkey (and so offers removing it without moving the key).</summary>
+    public bool HasRecoveryRemoves => _recoveryRemoves is not null;
 
     /// <summary>Adds a passkey: the system prompt creates it, then the list loads again.</summary>
     public PasskeyCommand AddCommand { get; }
@@ -225,7 +294,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     /// <returns>A task that completes when the list has loaded or failed.</returns>
     public Task LoadAsync()
     {
-        return RunAsync(token => Client.GetRegisteredPasskeysAsync(token), ShowAsync, workingText: Text.Updating, replacesForm: true);
+        return RunAsync(token => Client.GetPasskeyListAsync(token), ShowAsync, workingText: Text.Updating, replacesForm: true);
     }
 
     /// <summary>Whether the signed-out panel shows: the session has ended and the app's <see cref="IPasskeyNavigator.SignedOutAsync"/> is running.</summary>
@@ -264,25 +333,38 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         MoveAccountKeyCommand?.RaiseCanExecuteChanged();
         RemoveWithoutMovingCommand?.RaiseCanExecuteChanged();
         CancelHandoverCommand?.RaiseCanExecuteChanged();
+        LostDeviceCommand?.RaiseCanExecuteChanged();
+        OpenRecoveryCommand?.RaiseCanExecuteChanged();
+        StartRecoveryCommand?.RaiseCanExecuteChanged();
+        RemoveLostWithoutMovingCommand?.RaiseCanExecuteChanged();
+        CloseRecoveryCommand?.RaiseCanExecuteChanged();
+        CancelRecoveryCommand?.RaiseCanExecuteChanged();
         foreach (PasskeyItem item in Passkeys)
         {
             item.RenameCommand.RaiseCanExecuteChanged();
             item.RemoveCommand.RaiseCanExecuteChanged();
+            item.LostCommand.RaiseCanExecuteChanged();
         }
     }
 
-    private Task ShowAsync(IReadOnlyList<PasskeyCredential> credentials)
+    private Task ShowAsync(PasskeyList list)
     {
         RestoreForm();
         Passkeys.Clear();
+        IReadOnlyList<PasskeyCredential> credentials = list.Passkeys;
         bool canRemove = credentials.Count > 1;
         foreach (PasskeyCredential credential in credentials)
         {
-            Passkeys.Add(new PasskeyItem(credential, Text, canRemove, BeginRename, BeginRemoval, () => IsReady));
+            Passkeys.Add(new PasskeyItem(credential, Text, canRemove, BeginRename, BeginRemoval, BeginLost, () => IsReady, () => _pendingRecovery is null));
         }
         Editing = null;
         PendingRemoval = null;
         CloseHandover();
+        CloseRecovery();
+        _pendingRecovery = list.PendingRecovery;
+        _keySetRecoverable = list.KeySetRecoverable;
+        OnPropertyChanged(nameof(PendingRecovery));
+        OnPropertyChanged(nameof(PendingRecoveryText));
         _reloadOnBack = false;
         IsLoaded = true;
         Reset();
@@ -345,21 +427,175 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     private Task OpenHandoverAsync(PasskeyItem item)
     {
         Editing = null;
-        HeirChoices.Clear();
-        foreach (PasskeyItem passkey in Passkeys)
-        {
-            if (!string.Equals(passkey.CredentialId, item.CredentialId, StringComparison.Ordinal))
-            {
-                HeirChoices.Add(passkey);
-            }
-        }
-        // This session's passkey when it stays, or the only other one.  Otherwise the person chooses: Move stays off
-        // until they do, rather than the key going to whichever passkey happens to be listed first.
-        SelectedHeir = HeirChoices.FirstOrDefault(passkey => passkey.IsCurrent) ?? (HeirChoices.Count == 1 ? HeirChoices[0] : null);
+        CloseRecovery();
+        FillHeirs(item);
         PendingHandover = item;
         Reset();
         RaiseShows();
         return Task.CompletedTask;
+    }
+
+    // Every listed passkey except the one going.  This session's passkey when it stays, or the only other one; otherwise
+    // the person chooses, and Move (or Recover) stays off until they do, rather than the key going to whichever passkey
+    // happens to be listed first.
+    private void FillHeirs(PasskeyItem? except)
+    {
+        HeirChoices.Clear();
+        foreach (PasskeyItem passkey in Passkeys)
+        {
+            if (except is null || !string.Equals(passkey.CredentialId, except.CredentialId, StringComparison.Ordinal))
+            {
+                HeirChoices.Add(passkey);
+            }
+        }
+        SelectedHeir = HeirChoices.FirstOrDefault(passkey => passkey.IsCurrent) ?? (HeirChoices.Count == 1 ? HeirChoices[0] : null);
+    }
+
+    private void BeginLost(PasskeyItem item)
+    {
+        OpenRecovery(item);
+    }
+
+    private Task LostDeviceAsync()
+    {
+        PasskeyItem? item = _pendingHandover;
+        if (item is not null)
+        {
+            OpenRecovery(item);
+        }
+        return Task.CompletedTask;
+    }
+
+    private Task OpenRecoveryAsync(PasskeyItem? removes)
+    {
+        OpenRecovery(removes);
+        return Task.CompletedTask;
+    }
+
+    private void OpenRecovery(PasskeyItem? removes)
+    {
+        Editing = null;
+        PendingRemoval = null;
+        CloseHandover();
+        FillHeirs(removes);
+        _recoveryRemoves = removes;
+        _recoveryOpen = true;
+        OnPropertyChanged(nameof(RecoveryRemoves));
+        OnPropertyChanged(nameof(HasRecoveryRemoves));
+        Reset();
+        RaiseShows();
+        RaiseCommands();
+    }
+
+    // The heir is always named: the backend's default is this session's passkey, which may be the lost one.  The panel
+    // stays open until the recovery starts, so a heir that is too new can be swapped after Back.
+    private Task StartRecoveryAsync()
+    {
+        PasskeyItem? heir = _selectedHeir;
+        if (!_recoveryOpen || heir is null)
+        {
+            return Task.CompletedTask;
+        }
+        string? removes = _recoveryRemoves?.CredentialId;
+        return RunAsync(async token => WithRecoveryWording(await Client.RecoverKeySetAsync(heir.CredentialId, removes, token)),
+            started => started.SignOut.SignedOut ? SignedOutAsync(started.SignOut) : LoadAsync(), typedInput: true);
+    }
+
+    private Task RemoveLostWithoutMovingAsync()
+    {
+        PasskeyItem? item = _recoveryRemoves;
+        if (!_recoveryOpen || item is null)
+        {
+            return Task.CompletedTask;
+        }
+        return RunAsync(async token => WithKeepWording(await Client.DeletePasskeyAsync(item.CredentialId, PasskeyKeySetRemoval.KeepKeySet, token)), RemovedAsync, typedInput: true, workingText: Text.Updating);
+    }
+
+    private Task CloseRecoveryAsync()
+    {
+        CloseRecovery();
+        return Task.CompletedTask;
+    }
+
+    private void CloseRecovery()
+    {
+        if (!_recoveryOpen && _recoveryRemoves is null)
+        {
+            return;
+        }
+        _recoveryOpen = false;
+        _recoveryRemoves = null;
+        SelectedHeir = null;
+        HeirChoices.Clear();
+        OnPropertyChanged(nameof(RecoveryRemoves));
+        OnPropertyChanged(nameof(HasRecoveryRemoves));
+        RaiseShows();
+        RaiseCommands();
+    }
+
+    // Cancelling a recovery someone else started is the point of the notice, so it asks nothing first.  A recovery that
+    // is already gone (it moved, or another device cancelled it) loads the list again on Back.
+    private Task CancelRecoveryAsync()
+    {
+        PasskeyPendingRecovery? pending = _pendingRecovery;
+        if (pending is null)
+        {
+            return Task.CompletedTask;
+        }
+        return RunAsync(async token =>
+        {
+            PasskeyResult<bool> cancelled = Typed(await Client.CancelKeySetRecoveryAsync(pending.RecoveryId, token));
+            return cancelled.Error is { BackendCode: HttpPasskeyBackend.BackendCodes.NotFound } ? Reworded(cancelled, Text.PasskeysChangedMessage, true) : cancelled;
+        }, _ => LoadAsync(), typedInput: true, workingText: Text.Updating);
+    }
+
+    // A refused recovery says why in the app's words.  A refused or too-new heir goes back to the panel to choose another;
+    // a recovery that can't start because things changed (or can't start here at all) loads the list again on Back.
+    private PasskeyResult<PasskeyRecoveryStarted> WithRecoveryWording(PasskeyResult<PasskeyRecoveryStarted> result)
+    {
+        if (result.Error is not { BackendCode: not null } error)
+        {
+            return result;
+        }
+        switch (error.BackendCode)
+        {
+            case HttpPasskeyBackend.BackendCodes.InvalidHeir:
+                return Reworded(result, Text.AccountKeyHeirRefusedMessage, false);
+            case HttpPasskeyBackend.BackendCodes.HeirTooNew:
+                return Reworded(result, error.EligibleUtc is DateTime eligible ? PasskeyText.WithName(Text.RecoveryHeirTooNewMessage, MomentText(eligible)) : Text.RecoveryHeirTooNewLaterMessage, false);
+            case HttpPasskeyBackend.BackendCodes.RecoveryPending:
+                return Reworded(result, Text.RecoveryPendingMessage, true);
+            case HttpPasskeyBackend.BackendCodes.RotationUnavailable:
+                return Reworded(result, Text.RecoveryUnavailableMessage, true);
+            case HttpPasskeyBackend.BackendCodes.LastCredential:
+            case HttpPasskeyBackend.BackendCodes.LastPasskey:
+                return Reworded(result, Text.LastPasskeyMessage, true);
+            case HttpPasskeyBackend.BackendCodes.NotFound:
+            case HttpPasskeyBackend.BackendCodes.NotKeySet:
+            case HttpPasskeyBackend.BackendCodes.RemovesRequired:
+            case HttpPasskeyBackend.BackendCodes.NoKeySet:
+            case HttpPasskeyBackend.BackendCodes.KeySetChanged:
+            case HttpPasskeyBackend.BackendCodes.HeirGone:
+                return Reworded(result, Text.PasskeysChangedMessage, true);
+        }
+        return result;
+    }
+
+    // The same failure in the app's words; reloadOnBack when it showed the list is out of date.
+    private PasskeyResult<TValue> Reworded<TValue>(PasskeyResult<TValue> result, string message, bool reloadOnBack)
+    {
+        PasskeyError error = result.Error!;
+        if (reloadOnBack)
+        {
+            _reloadOnBack = true;
+        }
+        return PasskeyResult<TValue>.Failure(new PasskeyError(error.Category, message, error.BackendCode, error.EligibleUtc));
+    }
+
+    private static string MomentText(DateTime utc)
+    {
+        DateTime asUtc = utc.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(utc, DateTimeKind.Utc) : utc;
+        return asUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
     }
 
     // The heir is always named, even when it is this session's passkey: the backend's default would be the passkey being
@@ -419,6 +655,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         // The failure showed the list is out of date: Back goes to a fresh list, not to a panel about passkeys that changed.
         _reloadOnBack = false;
         CloseHandover();
+        CloseRecovery();
         return LoadAsync();
     }
 
@@ -435,6 +672,11 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         {
             case HttpPasskeyBackend.BackendCodes.InvalidHeir:
                 message = Text.AccountKeyHeirRefusedMessage;
+                break;
+            case HttpPasskeyBackend.BackendCodes.RecoveryPending:
+                // A lost-device recovery is waiting; the list shows it, with its Cancel.
+                message = Text.RecoveryPendingMessage;
+                _reloadOnBack = true;
                 break;
             case HttpPasskeyBackend.BackendCodes.LastCredential:
             case HttpPasskeyBackend.BackendCodes.LastPasskey:
@@ -499,6 +741,11 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         Editing = null;
         PendingRemoval = null;
         CloseHandover();
+        CloseRecovery();
+        _pendingRecovery = null;
+        _keySetRecoverable = false;
+        OnPropertyChanged(nameof(PendingRecovery));
+        OnPropertyChanged(nameof(PendingRecoveryText));
         _reloadOnBack = false;
         IsLoaded = false;
         RaiseShows();
@@ -508,6 +755,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     {
         PendingRemoval = null;
         CloseHandover();
+        CloseRecovery();
         EditName = item.Name ?? string.Empty;
         Editing = item;
     }
@@ -516,6 +764,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
     {
         Editing = null;
         CloseHandover();
+        CloseRecovery();
         PendingRemoval = item;
     }
 
@@ -555,6 +804,9 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
         OnPropertyChanged(nameof(ShowsEditor));
         OnPropertyChanged(nameof(ShowsRemoval));
         OnPropertyChanged(nameof(ShowsHandover));
+        OnPropertyChanged(nameof(ShowsPendingRecovery));
+        OnPropertyChanged(nameof(ShowsRecoverable));
+        OnPropertyChanged(nameof(ShowsRecovery));
         OnPropertyChanged(nameof(ShowsSigningOut));
     }
 
@@ -565,7 +817,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
 /// <summary>One row of the management list: what the backend reported about a passkey, as the screen shows it.</summary>
 public sealed class PasskeyItem
 {
-    internal PasskeyItem(PasskeyCredential credential, PasskeyText text, bool canRemove, Action<PasskeyItem> rename, Action<PasskeyItem> remove, Func<bool> ready)
+    internal PasskeyItem(PasskeyCredential credential, PasskeyText text, bool canRemove, Action<PasskeyItem> rename, Action<PasskeyItem> remove, Action<PasskeyItem> lost, Func<bool> ready, Func<bool> canRecover)
     {
         ArgumentNullException.ThrowIfNull(credential);
         ArgumentNullException.ThrowIfNull(text);
@@ -587,6 +839,11 @@ public sealed class PasskeyItem
             remove(this);
             return Task.CompletedTask;
         }, () => CanRemove && ready());
+        LostCommand = new PasskeyCommand(() =>
+        {
+            lost(this);
+            return Task.CompletedTask;
+        }, () => OffersLost && ready() && canRecover());
     }
 
     /// <summary>The passkey as the backend reported it.</summary>
@@ -639,6 +896,12 @@ public sealed class PasskeyItem
 
     /// <summary>Opens the removal confirmation for this passkey.</summary>
     public PasskeyCommand RemoveCommand { get; }
+
+    /// <summary>Whether the row offers "This device is lost": it holds the account key and another passkey could take it over.</summary>
+    public bool OffersLost => IsAccountKey && CanRemove;
+
+    /// <summary>Opens the recovery panel for this passkey, whose device is lost.</summary>
+    public PasskeyCommand LostCommand { get; }
 
     private static string DateText(DateTime utc)
     {

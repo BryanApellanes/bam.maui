@@ -151,6 +151,17 @@ public sealed class ScriptedPasskeyClient : IPasskeyClient
     public string? HandoverId { get; private set; }
     public string? HandoverHeir { get; private set; }
     public PasskeyProfile? SavedProfile { get; private set; }
+    /// <summary>The waiting recovery GetPasskeyListAsync reports with each list.</summary>
+    public PasskeyPendingRecovery? PendingRecovery { get; set; }
+    /// <summary>Whether GetPasskeyListAsync reports that a recovery can start.</summary>
+    public bool KeySetRecoverable { get; set; }
+    /// <summary>What RecoverKeySetAsync returns, one per call, before falling back to RecoveryResult.</summary>
+    public Queue<PasskeyResult<PasskeyRecoveryStarted>> RecoveryResults { get; } = new Queue<PasskeyResult<PasskeyRecoveryStarted>>();
+    public PasskeyResult<PasskeyRecoveryStarted> RecoveryResult { get; set; } = PasskeyResult<PasskeyRecoveryStarted>.Success(new PasskeyRecoveryStarted { SignOut = new PasskeySignOut { SignedOut = false }, EffectiveUtc = new DateTime(2026, 11, 29, 12, 0, 0, DateTimeKind.Utc) });
+    public string? RecoveryHeir { get; private set; }
+    public string? RecoveryRemoves { get; private set; }
+    public PasskeyResult CancelRecoveryResult { get; set; } = PasskeyResult.Success();
+    public string? CancelledRecoveryId { get; private set; }
 
     public static PasskeyCredential Phone { get; } = new PasskeyCredential { CredentialId = "phone", Name = "Phone", CreatedUtc = new DateTime(2026, 11, 1, 12, 0, 0, DateTimeKind.Utc), LastUsedUtc = new DateTime(2026, 11, 10, 12, 0, 0, DateTimeKind.Utc), IsCurrent = true, IsRegisteredKeySet = true };
     public static PasskeyCredential Laptop { get; } = new PasskeyCredential { CredentialId = "laptop", CreatedUtc = new DateTime(2026, 11, 2, 12, 0, 0, DateTimeKind.Utc), IsCurrent = false, IsRegisteredKeySet = false };
@@ -220,6 +231,31 @@ public sealed class ScriptedPasskeyClient : IPasskeyClient
             return Listed(Phone, Laptop);
         }
         return ListResults.Count > 1 ? ListResults.Dequeue() : ListResults.Peek();
+    }
+
+    public async Task<PasskeyResult<PasskeyList>> GetPasskeyListAsync(CancellationToken cancellationToken = default)
+    {
+        PasskeyResult<IReadOnlyList<PasskeyCredential>> listed = await GetRegisteredPasskeysAsync(cancellationToken);
+        return listed.Succeeded
+            ? PasskeyResult<PasskeyList>.Success(new PasskeyList { Passkeys = listed.Value!, PendingRecovery = PendingRecovery, KeySetRecoverable = KeySetRecoverable })
+            : PasskeyResult<PasskeyList>.Failure(listed.Error!);
+    }
+
+    public async Task<PasskeyResult<PasskeyRecoveryStarted>> RecoverKeySetAsync(string heirCredentialId, string? removedCredentialId = null, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("recover");
+        RecoveryHeir = heirCredentialId;
+        RecoveryRemoves = removedCredentialId;
+        await WaitAsync(cancellationToken);
+        return RecoveryResults.Count > 0 ? RecoveryResults.Dequeue() : RecoveryResult;
+    }
+
+    public async Task<PasskeyResult> CancelKeySetRecoveryAsync(string recoveryId, CancellationToken cancellationToken = default)
+    {
+        Calls.Add("cancelRecovery");
+        CancelledRecoveryId = recoveryId;
+        await WaitAsync(cancellationToken);
+        return CancelRecoveryResult;
     }
 
     public async Task<PasskeyResult<PasskeySignOut>> DeletePasskeyAsync(string credentialId, PasskeyKeySetRemoval keySet, CancellationToken cancellationToken = default)
