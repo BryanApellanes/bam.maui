@@ -233,6 +233,24 @@ public sealed class PasskeyText
     /// <summary>The notice about a waiting recovery.  <c>{0}</c> is the passkey it moves to, <c>{1}</c> when.</summary>
     public string PendingRecoveryMessage { get; set; } = "Your account key moves to {0} on {1}. Until then you can cancel it here or on any device you're signed in on. If you didn't start this, cancel it now.";
 
+    /// <summary>The sign-in screen's notice about a waiting recovery.  <c>{0}</c> is when the key moves.</summary>
+    public string SignInPendingRecoveryMessage { get; set; } = "Your account key is set to move to another of your passkeys on {0}. If you didn't start this, cancel it now.";
+
+    /// <summary>The sign-in notice's extra line when this app doesn't manage passkeys, so it can't cancel the move itself.</summary>
+    public string SignInPendingRecoveryElsewhereMessage { get; set; } = "If you didn't start this, cancel it where you manage your passkeys.";
+
+    /// <summary>The button on the sign-in notice that goes on into the app.</summary>
+    public string ContinueSignedIn { get; set; } = "Continue";
+
+    /// <summary>Shown when the recovery to cancel is no longer waiting; Back returns to the notice.</summary>
+    public string RecoveryGoneMessage { get; set; } = "That move is no longer waiting. Check your passkeys once you're in.";
+
+    /// <summary>
+    /// Stands in for the passkey a waiting recovery moves to when it isn't in the list, so it doesn't read like an
+    /// ordinary unnamed passkey.
+    /// </summary>
+    public string UnlistedHeir { get; set; } = "a passkey that isn't in your list";
+
     /// <summary>The button that cancels a waiting recovery.</summary>
     public string CancelRecovery { get; set; } = "Cancel the move";
 

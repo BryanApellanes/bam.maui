@@ -7,11 +7,18 @@ namespace Bam.Maui.Passkeys;
 /// the app's other way to sign in, and the link to registration.  A verified sign-in goes straight to
 /// <see cref="IPasskeyNavigator.SignedInAsync"/>; while that runs the screen shows <see cref="SignedInTitle"/> and
 /// <see cref="SigningInText"/>, never a blank page.
+/// <para>
+/// A sign-in that reports a waiting key-set recovery (<see cref="PasskeySignIn.PendingRecovery"/>) is held first: the
+/// screen shows when the key moves, with "Cancel the move" (when the app manages passkeys) and Continue, so a person whose
+/// device wasn't lost sees it before anything else.  The person is already signed in, so either way ends at
+/// <see cref="IPasskeyNavigator.SignedInAsync"/>.
+/// </para>
 /// </summary>
 public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
 {
     private string _handle = string.Empty;
     private bool _passkeysAvailable = true;
+    private PasskeySignIn? _held;
 
     /// <summary>Creates the view model.</summary>
     /// <param name="client">The passkey client.</param>
@@ -24,6 +31,8 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
         Mode = configuration.Experience.SignInModeFor(configuration.Features);
         SignInCommand = new PasskeyCommand(SignInAsync, () => ShowsPasskeyButton && CanStart);
         ContinueCommand = new PasskeyCommand(ContinueAsync, () => ShowsUsername && CanStart && !string.IsNullOrWhiteSpace(Handle));
+        CancelRecoveryCommand = new PasskeyCommand(CancelRecoveryAsync, () => ShowsPendingRecovery && OffersCancelRecovery);
+        ContinueSignedInCommand = new PasskeyCommand(ContinueSignedInAsync, () => ShowsPendingRecovery);
     }
 
     /// <inheritdoc />
@@ -43,6 +52,26 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
 
     /// <summary>The line under <see cref="SignedInTitle"/>.</summary>
     public string SigningInText => Text.SigningIn;
+
+    /// <summary>Whether the "opening your account" panel shows: signed in, and nothing held for the person to see first.</summary>
+    public bool ShowsSigningIn => HasSucceeded && _held is null;
+
+    /// <summary>Whether the notice about a waiting key-set recovery shows, before the app takes over.</summary>
+    public bool ShowsPendingRecovery => HasSucceeded && _held?.PendingRecovery is not null;
+
+    /// <summary>Whether the notice offers "Cancel the move": only when the app manages passkeys.</summary>
+    public bool OffersCancelRecovery => Configuration.Features.EnableManagement;
+
+    /// <summary>The notice about a waiting recovery, with when the key moves, or empty.</summary>
+    public string PendingRecoveryText => _held?.PendingRecovery is { } pending
+        ? PasskeyText.WithName(Text.SignInPendingRecoveryMessage, MomentText(pending.EffectiveUtc)) + (OffersCancelRecovery ? string.Empty : " " + Text.SignInPendingRecoveryElsewhereMessage)
+        : string.Empty;
+
+    /// <summary>Cancels the waiting recovery, then goes on into the app.</summary>
+    public PasskeyCommand CancelRecoveryCommand { get; }
+
+    /// <summary>Leaves the notice and goes on into the app, with the recovery still waiting.</summary>
+    public PasskeyCommand ContinueSignedInCommand { get; }
 
     /// <summary>Whether the username-less passkey button shows.</summary>
     public bool ShowsPasskeyButton => Mode != PasskeySignInMode.UsernameFirst;
@@ -90,6 +119,7 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
     {
         if (State == PasskeyViewState.Succeeded)
         {
+            Hold(null);
             Reset();
         }
         PasskeyCapabilities capabilities = await Client.GetCapabilitiesAsync(cancellationToken);
@@ -113,7 +143,20 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
         base.RaiseCommands();
         SignInCommand?.RaiseCanExecuteChanged();
         ContinueCommand?.RaiseCanExecuteChanged();
+        CancelRecoveryCommand?.RaiseCanExecuteChanged();
+        ContinueSignedInCommand?.RaiseCanExecuteChanged();
     }
+
+    /// <inheritdoc />
+    protected override void OnStateChanged()
+    {
+        base.OnStateChanged();
+        RaiseHeld();
+    }
+
+    // Back from a failed cancel returns to the notice, not the form: the person is signed in.
+    /// <inheritdoc />
+    protected override PasskeyViewState DismissedState => _held is null ? PasskeyViewState.Ready : PasskeyViewState.Succeeded;
 
     private Task SignInAsync()
     {
@@ -126,10 +169,71 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
         return RunAsync(token => Client.AuthenticateWithUsernameAsync(handle, token), SignedInAsync, typedInput: true);
     }
 
-    // The app has moved on; the screen goes back to the form for when it is shown again.
+    // The app has moved on; the screen goes back to the form for when it is shown again.  A waiting recovery holds the
+    // hand-over until the person has seen it.
     private async Task SignedInAsync(PasskeySignIn signIn)
     {
+        if (signIn.PendingRecovery is not null)
+        {
+            Hold(signIn);
+            return;
+        }
         await Navigator.SignedInAsync(signIn, PasskeyFlow.SignIn);
         Reset();
+    }
+
+    private Task ContinueSignedInAsync()
+    {
+        PasskeySignIn? held = _held;
+        return held is null ? Task.CompletedTask : NavigateAsync(() => HandOverAsync(held));
+    }
+
+    // A recovery that is already gone (it moved, or another device cancelled it) says so; Back returns to the notice.
+    private Task CancelRecoveryAsync()
+    {
+        PasskeySignIn? held = _held;
+        if (held?.PendingRecovery is not { } pending)
+        {
+            return Task.CompletedTask;
+        }
+        return RunAsync(async token =>
+        {
+            PasskeyResult cancelled = await Client.CancelKeySetRecoveryAsync(pending.RecoveryId, token);
+            if (cancelled.Succeeded)
+            {
+                return PasskeyResult<bool>.Success(true);
+            }
+            PasskeyError error = cancelled.Error!;
+            return PasskeyResult<bool>.Failure(error.BackendCode == HttpPasskeyBackend.BackendCodes.NotFound
+                ? new PasskeyError(error.Category, Text.RecoveryGoneMessage, error.BackendCode)
+                : error);
+        }, _ => HandOverAsync(held), workingText: Text.Updating);
+    }
+
+    private async Task HandOverAsync(PasskeySignIn signIn)
+    {
+        await Navigator.SignedInAsync(signIn, PasskeyFlow.SignIn);
+        Hold(null);
+        Reset();
+    }
+
+    private void Hold(PasskeySignIn? signIn)
+    {
+        _held = signIn;
+        RaiseHeld();
+        RaiseCommands();
+    }
+
+    private void RaiseHeld()
+    {
+        OnPropertyChanged(nameof(ShowsSigningIn));
+        OnPropertyChanged(nameof(ShowsPendingRecovery));
+        OnPropertyChanged(nameof(PendingRecoveryText));
+    }
+
+    private static string MomentText(DateTime utc)
+    {
+        DateTime asUtc = utc.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(utc, DateTimeKind.Utc) : utc;
+        return asUtc.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture);
     }
 }

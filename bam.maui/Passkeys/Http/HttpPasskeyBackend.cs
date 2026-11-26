@@ -248,13 +248,15 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         return new PasskeyList
         {
             Passkeys = credentials,
-            PendingRecovery = ReadPendingRecovery(root),
+            PendingRecovery = ReadPendingRecovery(root, Routes.Passkeys),
             KeySetRecoverable = OptionalBool(root, "keySetRecoverable", Routes.Passkeys) ?? false
         };
     }
 
     // A waiting recovery, null or absent when nothing waits.  Its id goes into the cancel path, so it must be base64url.
-    private static PasskeyPendingRecovery? ReadPendingRecovery(JsonElement root)
+    // A malformed one fails the answer rather than being dropped: dropping it would hide a recovery the person may not
+    // have started.
+    private static PasskeyPendingRecovery? ReadPendingRecovery(JsonElement root, string route)
     {
         if (!root.TryGetProperty("pendingRecovery", out JsonElement pending) || pending.ValueKind == JsonValueKind.Null)
         {
@@ -262,19 +264,19 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
         }
         if (pending.ValueKind != JsonValueKind.Object)
         {
-            throw Invalid(Routes.Passkeys, "has a pendingRecovery that is not an object");
+            throw Invalid(route, "has a pendingRecovery that is not an object");
         }
-        string recoveryId = RequiredString(pending, "id", Routes.Passkeys, MaxCeremonyIdLength);
+        string recoveryId = RequiredString(pending, "id", route, MaxCeremonyIdLength);
         if (!IsBase64Url(recoveryId))
         {
-            throw Invalid(Routes.Passkeys, "has an unusable pendingRecovery id");
+            throw Invalid(route, "has an unusable pendingRecovery id");
         }
         return new PasskeyPendingRecovery
         {
             RecoveryId = recoveryId,
-            RemovedCredentialId = OptionalString(pending, "removes", Routes.Passkeys),
-            HeirCredentialId = RequiredString(pending, "heir", Routes.Passkeys, MaxCredentialIdLength),
-            EffectiveUtc = RequiredDate(pending, "effectiveUtc", Routes.Passkeys)
+            RemovedCredentialId = OptionalString(pending, "removes", route),
+            HeirCredentialId = RequiredString(pending, "heir", route, MaxCredentialIdLength),
+            EffectiveUtc = RequiredDate(pending, "effectiveUtc", route)
         };
     }
 
@@ -741,7 +743,8 @@ public sealed class HttpPasskeyBackend : IPasskeyBackend, IDisposable
             Handle = RequiredString(root, "handle", route, 256),
             DisplayName = OptionalString(root, "displayName", route),
             NextUrl = SitePathOrNull(OptionalString(root, "nextUrl", route)),
-            ProfileCreated = OptionalBool(root, "profileCreated", route) ?? true
+            ProfileCreated = OptionalBool(root, "profileCreated", route) ?? true,
+            PendingRecovery = ReadPendingRecovery(root, route)
         };
     }
 

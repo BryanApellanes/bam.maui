@@ -12,6 +12,14 @@ Added
 - The management screen: "This device is lost" on the account-key row and in the move panel, a "Recover your account key" panel (`ShowsRecovery`, `RecoveryRemoves`, `StartRecoveryCommand`, `RemoveLostWithoutMovingCommand`, `CloseRecoveryCommand`), the waiting-recovery notice (`ShowsPendingRecovery`, `PendingRecoveryText`, `CancelRecoveryCommand`), and the offer when no passkey holds the key (`ShowsRecoverable`, `OpenRecoveryCommand`). Each refusal is worded on `PasskeyText`; one that shows the list changed reloads it on Back. A handover refused with `RecoveryPending` says a move is waiting.
 - 9 unit tests: suites `pkkr` and `pkrs`.
 
+Review round 1 (bam.maui#22), and bam.useraccounts#27's review changes
+- `PasskeySignIn.PendingRecovery`: the backend now reports a waiting recovery on every sign-in. `HttpPasskeyBackend` reads it with the same checks as the list's; a malformed one fails the answer rather than being dropped, since dropping it would hide a recovery the person may not have started.
+- The sign-in screen holds a sign-in that reports one: it shows when the key moves, with "Cancel the move" (when the app manages passkeys; otherwise it says where to cancel) and Continue, before calling `SignedInAsync`. A recovery that's already gone says so, and Back returns to the notice (`ShowsPendingRecovery`, `ShowsSigningIn`, `PendingRecoveryText`, `CancelRecoveryCommand`, `ContinueSignedInCommand`).
+- The management notice names a heir that isn't in the list as "a passkey that isn't in your list" (`PasskeyText.UnlistedHeir`), not as an ordinary unnamed passkey.
+- The default `IPasskeyClient.GetPasskeyListAsync` turns a success with no list into an invalid-response failure instead of throwing.
+- Tests pin that a heir's name is never read as a template placeholder, and that a rate-limited cancel is `RateLimited`.
+- 4 more unit tests: suite `pksr`.
+
 Changed (breaking for other implementations of the interfaces)
 - `IPasskeyBackend` and `IPasskeyClient` have the recovery members above. `GetPasskeyListAsync` is a default interface method on both, wrapping the old list with no recovery state.
 - The management screen loads with `GetPasskeyListAsync`.

@@ -69,6 +69,12 @@ public sealed record PasskeySignIn
     /// otherwise, and whenever the backend doesn't say.
     /// </summary>
     public bool ProfileCreated { get; init; } = true;
+
+    /// <summary>
+    /// A lost-device recovery of the account's key set that is waiting, or null.  The backend reports it on every
+    /// sign-in so the person can cancel a recovery they didn't start; the sign-in screen shows it before handing over.
+    /// </summary>
+    public PasskeyPendingRecovery? PendingRecovery { get; init; }
 }
 
 /// <summary>

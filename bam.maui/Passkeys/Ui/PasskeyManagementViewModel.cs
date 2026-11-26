@@ -248,7 +248,7 @@ public sealed class PasskeyManagementViewModel : PasskeyFlowViewModel
             {
                 return string.Empty;
             }
-            string heir = Passkeys.FirstOrDefault(item => string.Equals(item.CredentialId, pending.HeirCredentialId, StringComparison.Ordinal))?.Title ?? Text.UnnamedPasskey;
+            string heir = Passkeys.FirstOrDefault(item => string.Equals(item.CredentialId, pending.HeirCredentialId, StringComparison.Ordinal))?.Title ?? Text.UnlistedHeir;
             // {1} first: the date has no braces, and the passkey's name, which the person chose, is never scanned again.
             return PasskeyText.WithName(Text.PendingRecoveryMessage.Replace("{1}", MomentText(pending.EffectiveUtc), StringComparison.Ordinal), heir);
         }

@@ -68,9 +68,14 @@ public interface IPasskeyClient
     async Task<PasskeyResult<PasskeyList>> GetPasskeyListAsync(CancellationToken cancellationToken = default)
     {
         PasskeyResult<IReadOnlyList<PasskeyCredential>> listed = await GetRegisteredPasskeysAsync(cancellationToken).ConfigureAwait(false);
-        return listed.Succeeded && listed.Value is not null
-            ? PasskeyResult<PasskeyList>.Success(new PasskeyList { Passkeys = listed.Value })
-            : PasskeyResult<PasskeyList>.Failure(listed.Error!);
+        if (listed.Succeeded)
+        {
+            // A client that reports success with no list is answering wrongly, not failing to reach the backend.
+            return listed.Value is null
+                ? PasskeyResult<PasskeyList>.Failure(new PasskeyError(PasskeyErrorCategory.InvalidServerResponse, new PasskeyMessages().For(PasskeyErrorCategory.InvalidServerResponse)))
+                : PasskeyResult<PasskeyList>.Success(new PasskeyList { Passkeys = listed.Value });
+        }
+        return PasskeyResult<PasskeyList>.Failure(listed.Error ?? new PasskeyError(PasskeyErrorCategory.Unknown, new PasskeyMessages().For(PasskeyErrorCategory.Unknown)));
     }
 
     /// <summary>Revokes one of the signed-in account's passkeys on the backend.</summary>

@@ -70,12 +70,30 @@ public sealed class PasskeySignInView : PasskeyScreenLayout
                 spinner
             }
         };
-        PasskeyViewParts.ShowWhen(signedIn, nameof(PasskeyFlowViewModel.HasSucceeded));
+        PasskeyViewParts.ShowWhen(signedIn, nameof(PasskeySignInViewModel.ShowsSigningIn));
+
+        // A waiting key-set recovery is shown before the app takes over, so a person who didn't start it can stop it.
+        Label pendingTitle = PasskeyViewParts.Fixed(text.PendingRecoveryTitle, 20, PasskeyResourceKeys.Text);
+        SemanticProperties.SetHeadingLevel(pendingTitle, SemanticHeadingLevel.Level2);
+        Button cancelMove = PasskeyViewParts.Primary(text.CancelRecovery, nameof(PasskeySignInViewModel.CancelRecoveryCommand));
+        cancelMove.SetBinding(VisualElement.IsVisibleProperty, nameof(PasskeySignInViewModel.OffersCancelRecovery));
+        VerticalStackLayout pending = new VerticalStackLayout
+        {
+            Spacing = 16,
+            Children =
+            {
+                pendingTitle,
+                PasskeyViewParts.Body(nameof(PasskeySignInViewModel.PendingRecoveryText), PasskeyResourceKeys.Text),
+                cancelMove,
+                PasskeyViewParts.Secondary(text.ContinueSignedIn, nameof(PasskeySignInViewModel.ContinueSignedInCommand))
+            }
+        };
+        PasskeyViewParts.ShowWhen(pending, nameof(PasskeySignInViewModel.ShowsPendingRecovery));
 
         return new VerticalStackLayout
         {
             Spacing = 0,
-            Children = { form, signedIn, new PasskeyStatusView(text, viewModel.Configuration.Experience.AlternativeSignInLabel) }
+            Children = { form, signedIn, pending, new PasskeyStatusView(text, viewModel.Configuration.Experience.AlternativeSignInLabel) }
         };
     }
 }
