@@ -124,8 +124,9 @@ public sealed record PasskeyList
     public bool KeySetRecoverable { get; init; }
 
     /// <summary>
-    /// Whether the person has a key set that no passkey holds and that recovery can't take over: it wasn't a removed
-    /// passkey's recorded key, or this host can't recover.  Only an operator can restore it.  Never true together with
+    /// Whether the person has a key set that no passkey holds and that recovery can't move: it isn't a removed passkey's
+    /// recorded key (another device's key, or one support set up), or this host can't recover.  Information, not a fault: only
+    /// someone who lost what holds the key needs support.  Omitted on the wire when false.  Never true together with
     /// <see cref="KeySetRecoverable"/>, and false while a recovery waits or when there's no key set.
     /// </summary>
     public bool KeySetUnrecoverable { get; init; }

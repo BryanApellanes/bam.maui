@@ -228,11 +228,11 @@ public sealed class PasskeyText
     public string KeySetRecoverableMessage { get; set; } = "Choose one of your passkeys to take it over. The key moves after a waiting period, so there is time to cancel it if you didn't ask for it.";
 
     /// <summary>
-    /// Shown when no passkey holds the account key and recovery can't take it over (<see cref="PasskeyList.KeySetUnrecoverable"/>),
-    /// and when such a recovery is refused: the server can't tell the key was a passkey's (a key set left from before removals
-    /// were recorded).  An operator can still restore it, so a white-label app can name its own support channel here.
+    /// Shown when no passkey holds the account key and recovery can't move it (<see cref="PasskeyList.KeySetUnrecoverable"/>),
+    /// and when such a recovery is refused.  It isn't a fault: the key may be held by another device or by a key support set up.
+    /// Only someone who lost what holds it needs support, so a white-label app can name its own support channel here.
     /// </summary>
-    public string KeySetUnrecoverableMessage { get; set; } = "This account's key can't be recovered from this device. Contact support.";
+    public string KeySetUnrecoverableMessage { get; set; } = "Your account key is held somewhere other than your passkeys, such as another device or a key support set up, so it can't be moved from here. If you've lost what holds it, contact support.";
 
     /// <summary>The heading of the notice about a recovery that is waiting.</summary>
     public string PendingRecoveryTitle { get; set; } = "Your account key is moving";

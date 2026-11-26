@@ -19,6 +19,7 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
     private string _handle = string.Empty;
     private bool _passkeysAvailable = true;
     private PasskeySignIn? _held;
+    private bool _handingOver;
 
     /// <summary>Creates the view model.</summary>
     /// <param name="client">The passkey client.</param>
@@ -54,10 +55,10 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
     public string SigningInText => Text.SigningIn;
 
     /// <summary>Whether the "opening your account" panel shows: signed in, and nothing held for the person to see first.</summary>
-    public bool ShowsSigningIn => HasSucceeded && _held is null;
+    public bool ShowsSigningIn => HasSucceeded && (_held is null || _handingOver);
 
     /// <summary>Whether the notice about a waiting key-set recovery shows, before the app takes over.</summary>
-    public bool ShowsPendingRecovery => HasSucceeded && _held?.PendingRecovery is not null;
+    public bool ShowsPendingRecovery => HasSucceeded && !_handingOver && _held?.PendingRecovery is not null;
 
     /// <summary>Whether the notice offers "Cancel the move": only when the app manages passkeys.</summary>
     public bool OffersCancelRecovery => Configuration.Features.EnableManagement;
@@ -239,16 +240,35 @@ public sealed class PasskeySignInViewModel : PasskeyFlowViewModel
         Reset();
     }
 
+    // While the app takes over, the screen shows "opening your account" and the notice's commands can't run, so the app is
+    // told once.  The hold stays until the app returns: a navigation that fails leaves it, so Back returns to the notice.
     private async Task HandOverAsync(PasskeySignIn signIn)
     {
-        await Navigator.SignedInAsync(signIn, PasskeyFlow.SignIn);
+        _handingOver = true;
+        RaiseHeld();
+        RaiseCommands();
+        try
+        {
+            await Navigator.SignedInAsync(signIn, PasskeyFlow.SignIn);
+        }
+        finally
+        {
+            _handingOver = false;
+            RaiseHeld();
+            RaiseCommands();
+        }
         Hold(null);
         Reset();
     }
 
+    // A new hold forgets the sign-in call's retry: Try again on the notice would start another sign-in.
     private void Hold(PasskeySignIn? signIn)
     {
         _held = signIn;
+        if (signIn is not null)
+        {
+            ForgetLastAttempt();
+        }
         RaiseHeld();
         RaiseCommands();
     }

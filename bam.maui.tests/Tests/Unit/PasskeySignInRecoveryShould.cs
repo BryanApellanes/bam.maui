@@ -226,6 +226,41 @@ public class PasskeySignInRecoveryShould : UnitTestMenuContainer
         .UnlessItFailed();
     }
 
+    [UnitTest]
+    public void TellTheAppOnceWhileContinueHandsOver()
+    {
+        After.Setup(reg => reg.Set(new ScriptedPasskeyClient()))
+        .When<ScriptedPasskeyClient>("is held on the notice, tries Try again there, then taps Continue and, while the app takes over, Cancel the move", (client, reg) =>
+        {
+            FakePasskeyNavigator navigator = new FakePasskeyNavigator();
+            PasskeySignInViewModel screen = new PasskeySignInViewModel(client, PasskeyClientFixture.ValidConfiguration(), navigator);
+            client.SignInResults.Enqueue(PasskeyResult<PasskeySignIn>.Success(new PasskeySignIn { Handle = "ada", PendingRecovery = Pending }));
+            Wait(screen.SignInCommand.ExecuteAsync());
+            string retry = screen.TryAgainCommand.CanExecute(null).ToString();
+            Wait(screen.TryAgainCommand.ExecuteAsync());
+            retry += "|" + string.Join(",", client.Calls) + "|" + screen.ShowsPendingRecovery;
+
+            string during = string.Empty;
+            navigator.WhileSignedIn = () =>
+            {
+                during = screen.ShowsSigningIn + "|" + screen.ShowsPendingRecovery + "|" + screen.CancelRecoveryCommand.CanExecute(null) + "|" + screen.ContinueSignedInCommand.CanExecute(null);
+                screen.CancelRecoveryCommand.ExecuteAsync().GetAwaiter().GetResult();
+            };
+            Wait(screen.ContinueSignedInCommand.ExecuteAsync());
+            string after = navigator.Joined + "|" + string.Join(",", client.Calls) + "|" + screen.ShowsPendingRecovery;
+            return new HandOverOutcome(retry, during, after);
+        })
+        .TheTest
+        .ShouldPass<HandOverOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("Try again on the notice starts nothing: " + outcome.Retry, outcome.Retry == "False|authenticate|True");
+            because.ItsTrue("while Continue hands over, the screen says it's opening the account and the notice can't be used: " + outcome.During, outcome.During == "True|False|False|False");
+            because.ItsTrue("so the app is told once, and nothing is cancelled: " + outcome.After, outcome.After == "signedIn|authenticate|False");
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
     private static PasskeySignIn? SignIn(string body, out PasskeyErrorCategory? error)
     {
         FakeAccountEndpoints fake = new FakeAccountEndpoints().Respond(HttpStatusCode.OK, body);
@@ -259,6 +294,8 @@ public class PasskeySignInRecoveryShould : UnitTestMenuContainer
     private sealed record HoldOutcome(HeldShot Held, string Continued, string Cancelled, string Navigated, string Calls);
 
     private sealed record CancelOutcome(string Gone, string GoneBack, string Offline, string Retried, HeldShot Elsewhere);
+
+    private sealed record HandOverOutcome(string Retry, string During, string After);
 
     private sealed record LifetimeOutcome(string Startable, string Stopped, string Appeared, string Continued, string Later, string Cancelled);
 

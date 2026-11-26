@@ -64,7 +64,7 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
         PasskeyViewParts.ShowWhen(recoverable, nameof(PasskeyManagementViewModel.ShowsRecoverable));
         screen.Children.Add(recoverable);
 
-        // Same heading, but nothing to press: only an operator can restore this key.
+        // Same heading, but nothing to press: something other than a passkey holds the key.  Plain text, not an error.
         Label unrecoverableTitle = PasskeyViewParts.Fixed(text.KeySetRecoverableTitle, 20, PasskeyResourceKeys.Text);
         SemanticProperties.SetHeadingLevel(unrecoverableTitle, SemanticHeadingLevel.Level2);
         VerticalStackLayout unrecoverable = new VerticalStackLayout
