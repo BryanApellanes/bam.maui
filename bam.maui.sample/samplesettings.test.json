@@ -1,0 +1,11 @@
+{
+  // test: its own relying party, so a test passkey can never sign in on prod (bam.useraccounts#37).
+  "relyingPartyId": "test.whoiam.is",
+  "accountEndpoint": null,
+  "askForEmail": false,
+  "branding": {
+    "applicationName": "Passkey Sample (test)",
+    "primaryColor": "#2457C5",
+    "secondaryColor": "#172B4D"
+  }
+}

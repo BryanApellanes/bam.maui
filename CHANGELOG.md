@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Installable sample app (bam.maui#23)
+
+Added
+- **`bam.maui.sample`:** a MAUI app on `Bam.Maui.Passkeys` for Android (API 28 and later) and Windows. It covers sign-up, sign-in, passkey management, account-key moves and lost-device recovery, on a real device.
+  - Its brand comes only from a settings file per deployment level: the relying-party id, the account endpoint, `PasskeyBranding` and `askForEmail`. Unknown keys are refused.
+  - The levels are `samplesettings.dev.json` (`dev.whoiam.is`), `samplesettings.test.json` (`test.whoiam.is`) and `samplesettings.prod.json` (`whoiam.is` through `https://www.whoiam.is/account/`). `-p:BamSampleLevel` picks one; Debug builds default to dev and Release to prod. dev and test packages carry a `.dev` or `.test` suffix.
+  - The signed-in page shows only the name and handle the backend sent.
+  - Android backup is off.
+- **`build/init-framework.sh`:** checks out the framework submodules bam.maui builds against, run from the bamtk root.
+- **The `sample` workflow:**
+  - A read-only build job runs the tests and builds both apps on every pull request to main. It has no secrets, and it reads the public framework over https.
+  - A `sample-v*` tag on a commit that's on `main` also runs the release job. That job alone holds the write token and the signing key, from the `sample-release` environment, and a release without the key is refused.
+  - It publishes a signed APK and a self-contained Windows zip, with the bamtk commit and SHA-256s in the release notes.
+- **Tests:** `SampleAppShould` (pksa) covers each level's settings, a brand on its own domain, refused settings (duplicate keys and theme modes too), moving between the screens (including sign-out when the server fails, and no window), and the signed-in text.
+- Settings refuse a key given twice, and read `themeMode` by name.
+- A failed sign-out still returns to sign-in, since the client has already forgotten the session. Manage passkeys can't be pushed twice by a quick double tap.
+
 ### Key-set recovery (bam.maui#20, against bam.useraccounts#27)
 
 Added
