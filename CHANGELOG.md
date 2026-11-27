@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Key-set recovery (bam.maui#20, against bam.useraccounts#27)
+
+Added
+- `IPasskeyClient.RecoverKeySetAsync(heirId, lostId?)`: recovers the account's key set when the passkey that holds it is lost. The backend issues assertion options for the heir only, the system prompt runs them, and the backend starts a recovery that takes effect after its waiting period (`PasskeyRecoveryStarted.EffectiveUtc`). The heir is always named, since the backend's default (this session's passkey) may be the lost one. Gated on `EnableManagement`; refuses a missing heir, or a heir that is the lost passkey, before asking anyone.
+- `IPasskeyClient.CancelKeySetRecoveryAsync(recoveryId)` and `GetPasskeyListAsync()`, which returns `PasskeyList`: the passkeys, `PendingRecovery` and `KeySetRecoverable`.
+- `IPasskeyBackend.BeginKeySetRecoveryAsync`, `CompleteKeySetRecoveryAsync`, `CancelKeySetRecoveryAsync` and `GetPasskeyListAsync`, with `PasskeyRecoveryChallenge`, `PasskeyRecoveryStarted` and `PasskeyPendingRecovery`. `HttpPasskeyBackend` posts `keyset/recovery/begin`, `.../complete` and `keyset/recovery/{id}/cancel`, reads `pendingRecovery` and `keySetRecoverable` from the list, refuses a recovery id that isn't base64url before putting it in a path, maps `RemovesRequired`, `HeirTooNew`, `RecoveryPending` and `NoKeySet` to `InvalidOptions`, and clears its cookie jar when a recovery ends the session.
+- `PasskeyError.EligibleUtc` and `PasskeyException.EligibleUtc`: when a `HeirTooNew` refusal says from when the heir can take over. Anything else in the field is dropped, not an error.
+- The management screen: "This device is lost" on the account-key row and in the move panel, a "Recover your account key" panel (`ShowsRecovery`, `RecoveryRemoves`, `StartRecoveryCommand`, `RemoveLostWithoutMovingCommand`, `CloseRecoveryCommand`), the waiting-recovery notice (`ShowsPendingRecovery`, `PendingRecoveryText`, `CancelRecoveryCommand`), and the offer when no passkey holds the key (`ShowsRecoverable`, `OpenRecoveryCommand`). Each refusal is worded on `PasskeyText`; one that shows the list changed reloads it on Back. A handover refused with `RecoveryPending` says a move is waiting.
+- 9 unit tests: suites `pkkr` and `pkrs`.
+
+Review round 1 (bam.maui#22), and bam.useraccounts#27's review changes
+- `PasskeySignIn.PendingRecovery`: the backend now reports a waiting recovery on every sign-in. `HttpPasskeyBackend` reads it with the same checks as the list's; a malformed one fails the answer rather than being dropped, since dropping it would hide a recovery the person may not have started.
+- The sign-in screen holds a sign-in that reports one: it shows when the key moves, with "Cancel the move" (when the app manages passkeys; otherwise it says where to cancel) and Continue, before calling `SignedInAsync`. A recovery that's already gone says so, and Back returns to the notice (`ShowsPendingRecovery`, `ShowsSigningIn`, `PendingRecoveryText`, `CancelRecoveryCommand`, `ContinueSignedInCommand`).
+- The management notice names a heir that isn't in the list as "a passkey that isn't in your list" (`PasskeyText.UnlistedHeir`), not as an ordinary unnamed passkey.
+- The default `IPasskeyClient.GetPasskeyListAsync` turns a success with no list into an invalid-response failure instead of throwing.
+- Tests pin that a heir's name is never read as a template placeholder, and that a rate-limited cancel is `RateLimited`.
+- 4 more unit tests: suite `pksr`.
+
+Review round 2 (bam.maui#22): a held sign-in lasts exactly as long as its notice
+- Stopping "Cancel the move" while it runs goes back to the notice, not the form (new `PasskeyFlowViewModel.QuietState`, where a quiet failure returns; the sign-in screen uses its `DismissedState`). Before this, the form came back with the hold still set, and a later failure's Back and Continue could hand the app that earlier sign-in, even after someone else had signed in.
+- No new sign-in starts while one is held, and each sign-in replaces the hold with its own answer.
+- `LoadAsync` while the notice shows (the page appearing again) keeps it, instead of dropping the person on the form, signed in without the app knowing.
+- A successful cancel hands the app a sign-in with `PendingRecovery` null, and shows "opening your account" while the app takes over.
+- 1 more unit test (`KeepAHeldSignInOnlyAsLongAsItsNotice`). The rate-limit test body now uses the server's `RateLimited` code.
+- Round 3: while Continue hands over, the screen shows "opening your account" and the notice's commands can't run, so the app is told once. A navigation failure keeps the hold, so Back returns to the notice. Taking a hold forgets the sign-in's retry, so Try again on the notice starts nothing (new protected `PasskeyFlowViewModel.ForgetLastAttempt`). 1 more unit test (`TellTheAppOnceWhileContinueHandsOver`).
+
+Removal records (bam.useraccounts#27 security fix S3; decision on bam.protocol#85)
+- A recovery that names no lost passkey works only when the server recorded that a removed passkey held the key. A key set left from before removals were recorded is refused with `NoKeySet`. The screen now says the key is held somewhere other than the person's passkeys and can't be moved from here, with support only for someone who lost what holds it (`PasskeyText.KeySetUnrecoverableMessage`, matching bam.useraccounts#27's `RecoveryUnrecoverableNote` at 12f56c3; a white-label app can point it at its own support) instead of "your passkeys changed". Back reloads the list. `NoKeySet` on a recovery that does name a lost passkey still means the list changed.
+- `PasskeyList.KeySetUnrecoverable` (wire `keySetUnrecoverable`, omitted when false; missing reads as false): the person has a key set no passkey holds, and recovery can't move it. That's information, not a fault: another device's key or one support set up gives the same answer. The management screen shows the same heading as the recovery offer, with `KeySetUnrecoverableMessage` and nothing to press (`ShowsUnrecoverable`). A list that claims both is read as recoverable, and a waiting recovery comes first.
+- The waiting-recovery notices end "cancel it and remove that passkey" (on sign-in: "the passkey it moves to"), because cancelling alone doesn't stop someone who holds the heir.
+- 1 more unit test (`SayAKeyWithNoRemovalRecordCantBeRecovered`). `NoKeySet` is added to the refusal table, and the list-reader tests cover `keySetUnrecoverable`.
+
+Changed (breaking for other implementations of the interfaces)
+- `IPasskeyBackend` and `IPasskeyClient` have the recovery members above. `GetPasskeyListAsync` is a default interface method on both, wrapping the old list with no recovery state.
+- The management screen loads with `GetPasskeyListAsync`.
+- `PasskeyText.RemoveWithoutMovingMessage` points at "This device is lost" first.
+
 ### Key-set handover (bam.maui#7, against bam.useraccounts#20)
 
 Added
@@ -23,7 +60,7 @@ Changed (breaking for other implementations of the interfaces)
 - `IPasskeyBackend` and `IPasskeyClient` have the new members above. The old `DeletePasskeyAsync(id)` stays, as a default interface method that calls the new overload with `PasskeyKeySetRemoval.Default`.
 
 Not yet
-- The lost-device recovery (`keyset/recovery/*`, `pendingRecovery`, `keySetRecoverable`; contract on bam.maui#7) waits for its bam.useraccounts PR.
+- The lost-device recovery: done in bam.maui#20, above.
 
 ### Phase 5: passkey management (bam.maui#18)
 

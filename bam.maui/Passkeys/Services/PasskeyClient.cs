@@ -154,6 +154,20 @@ public sealed class PasskeyClient : IPasskeyClient
     }
 
     /// <inheritdoc />
+    public Task<PasskeyResult<PasskeyList>> GetPasskeyListAsync(CancellationToken cancellationToken = default)
+    {
+        return RunAsync<PasskeyList>("passkey listing", _configuration.Features.EnableManagement, false, async token =>
+        {
+            PasskeyList list = await FromBackend(() => _backend.GetPasskeyListAsync(token), token).ConfigureAwait(false);
+            if (list?.Passkeys is null)
+            {
+                throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend returned no credential list.");
+            }
+            return list;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public Task<PasskeyResult<PasskeySignOut>> DeletePasskeyAsync(string credentialId, CancellationToken cancellationToken = default)
     {
         return DeletePasskeyAsync(credentialId, PasskeyKeySetRemoval.Default, cancellationToken);
@@ -199,6 +213,53 @@ public sealed class PasskeyClient : IPasskeyClient
             PasskeySignOut signOut = await FromBackend(() => _backend.CompleteKeySetHandoverAsync(credentialId, challenge, response, token), token).ConfigureAwait(false);
             return RequireSignOut(signOut);
         }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<PasskeyResult<PasskeyRecoveryStarted>> RecoverKeySetAsync(string heirCredentialId, string? removedCredentialId = null, CancellationToken cancellationToken = default)
+    {
+        string? removed = string.IsNullOrWhiteSpace(removedCredentialId) ? null : removedCredentialId;
+        return RunAsync<PasskeyRecoveryStarted>("key-set recovery", _configuration.Features.EnableManagement, true, async token =>
+        {
+            // Always named: the backend's default heir is this session's passkey, which may be the lost one.
+            RequireCredentialId(heirCredentialId);
+            if (string.Equals(removed, heirCredentialId, StringComparison.Ordinal))
+            {
+                // The backend refuses this too; refusing here keeps the system prompt from coming up for nothing.
+                throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "The key set can't be recovered to the passkey being taken out of sign-in.");
+            }
+            PasskeyRecoveryChallenge challenge = await FromBackend(() => _backend.BeginKeySetRecoveryAsync(removed, heirCredentialId, token), token).ConfigureAwait(false);
+            if (challenge?.Options is null || string.IsNullOrWhiteSpace(challenge.RecoveryId))
+            {
+                throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend returned no recovery challenge.");
+            }
+            WebAuthnAssertionResponse? response = await _authenticator.AssertAsync(challenge.Options, token).ConfigureAwait(false);
+            if (response is null)
+            {
+                throw new PasskeyException(PasskeyErrorCategory.PlatformFailure, "The authenticator returned no assertion.");
+            }
+            PasskeyRecoveryStarted started = await FromBackend(() => _backend.CompleteKeySetRecoveryAsync(challenge, response, token), token).ConfigureAwait(false);
+            if (started?.SignOut is null)
+            {
+                throw new PasskeyException(PasskeyErrorCategory.InvalidServerResponse, "The backend did not say whether the recovery ended the session.");
+            }
+            return started;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PasskeyResult> CancelKeySetRecoveryAsync(string recoveryId, CancellationToken cancellationToken = default)
+    {
+        PasskeyResult<bool> result = await RunAsync<bool>("key-set recovery cancellation", _configuration.Features.EnableManagement, false, async token =>
+        {
+            if (string.IsNullOrWhiteSpace(recoveryId))
+            {
+                throw new PasskeyException(PasskeyErrorCategory.InvalidOptions, "A recovery id is required.");
+            }
+            await FromBackend(() => Completed(_backend.CancelKeySetRecoveryAsync(recoveryId, token)), token).ConfigureAwait(false);
+            return true;
+        }, cancellationToken).ConfigureAwait(false);
+        return WithoutValue(result);
     }
 
     /// <inheritdoc />

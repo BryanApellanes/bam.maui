@@ -59,6 +59,25 @@ public interface IPasskeyClient
     /// <returns>The registered passkeys on success.</returns>
     Task<PasskeyResult<IReadOnlyList<PasskeyCredential>>> GetRegisteredPasskeysAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Lists the signed-in account's passkeys with the state of its key set: a lost-device recovery that is waiting, and
+    /// whether one can start.  The default lists the passkeys and reports neither.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The passkeys and the key set's state on success.</returns>
+    async Task<PasskeyResult<PasskeyList>> GetPasskeyListAsync(CancellationToken cancellationToken = default)
+    {
+        PasskeyResult<IReadOnlyList<PasskeyCredential>> listed = await GetRegisteredPasskeysAsync(cancellationToken).ConfigureAwait(false);
+        if (listed.Succeeded)
+        {
+            // A client that reports success with no list is answering wrongly, not failing to reach the backend.
+            return listed.Value is null
+                ? PasskeyResult<PasskeyList>.Failure(new PasskeyError(PasskeyErrorCategory.InvalidServerResponse, new PasskeyMessages().For(PasskeyErrorCategory.InvalidServerResponse)))
+                : PasskeyResult<PasskeyList>.Success(new PasskeyList { Passkeys = listed.Value });
+        }
+        return PasskeyResult<PasskeyList>.Failure(listed.Error ?? new PasskeyError(PasskeyErrorCategory.Unknown, new PasskeyMessages().For(PasskeyErrorCategory.Unknown)));
+    }
+
     /// <summary>Revokes one of the signed-in account's passkeys on the backend.</summary>
     /// <param name="credentialId">The credential to revoke.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
@@ -90,6 +109,24 @@ public interface IPasskeyClient
     /// <param name="cancellationToken">Cancels the ceremony.</param>
     /// <returns>Once the key set has moved and the passkey is removed: whether that ended this session.</returns>
     Task<PasskeyResult<PasskeySignOut>> HandOverKeySetAsync(string credentialId, string? heirCredentialId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Starts a lost-device recovery: the key set moves to <paramref name="heirCredentialId"/> after the backend's waiting
+    /// period (72 hours by default for the bam account endpoints), unless one of the person's sessions cancels it first.
+    /// The system prompt asks for the heir, which must be on this device, and the backend verifies it.  The lost passkey,
+    /// when named, is taken out of sign-in at once.
+    /// </summary>
+    /// <param name="heirCredentialId">Another of the account's passkeys to take over the key set.</param>
+    /// <param name="removedCredentialId">The lost passkey that holds the key set, or null when its passkey was already removed.</param>
+    /// <param name="cancellationToken">Cancels the ceremony.</param>
+    /// <returns>Once the recovery is waiting: whether that ended this session, and when the key set moves.</returns>
+    Task<PasskeyResult<PasskeyRecoveryStarted>> RecoverKeySetAsync(string heirCredentialId, string? removedCredentialId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Cancels a waiting lost-device recovery (<see cref="PasskeyList.PendingRecovery"/>).</summary>
+    /// <param name="recoveryId">The recovery's id.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Success once the backend has cancelled it.</returns>
+    Task<PasskeyResult> CancelKeySetRecoveryAsync(string recoveryId, CancellationToken cancellationToken = default);
 
     /// <summary>Renames one of the signed-in account's passkeys.</summary>
     /// <param name="credentialId">The credential to rename.</param>

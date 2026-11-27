@@ -68,12 +68,20 @@ public sealed record PasskeyError
     /// <param name="category">Why the operation failed.</param>
     /// <param name="message">The user-facing message, taken from <see cref="PasskeyMessages"/>.</param>
     /// <param name="backendCode">The backend's own refusal code, when it sent one (see <see cref="BackendCode"/>).</param>
-    public PasskeyError(PasskeyErrorCategory category, string message, string? backendCode = null)
+    /// <param name="eligibleUtc">When the refused request can succeed, when the backend said (see <see cref="EligibleUtc"/>).</param>
+    public PasskeyError(PasskeyErrorCategory category, string message, string? backendCode = null, DateTime? eligibleUtc = null)
     {
         Category = category;
         Message = message;
         BackendCode = backendCode;
+        EligibleUtc = eligibleUtc;
     }
+
+    /// <summary>
+    /// When the refused request can succeed, when the backend said: for the bam account endpoints' <c>HeirTooNew</c>, when
+    /// the chosen passkey is old enough to take over the key set.  Null otherwise.
+    /// </summary>
+    public DateTime? EligibleUtc { get; }
 
     /// <summary>
     /// The backend's coarse refusal code, when the backend sent one (for the bam account endpoints,
@@ -104,12 +112,17 @@ public sealed class PasskeyException : Exception
     /// <param name="diagnosticMessage">A message for developers; must not contain secrets or WebAuthn payloads.</param>
     /// <param name="innerException">The platform or transport exception, if any.</param>
     /// <param name="backendCode">The backend's coarse refusal code, if it sent one; see <see cref="PasskeyError.BackendCode"/>.</param>
-    public PasskeyException(PasskeyErrorCategory category, string? diagnosticMessage = null, Exception? innerException = null, string? backendCode = null)
+    /// <param name="eligibleUtc">When the refused request can succeed, if the backend said; see <see cref="PasskeyError.EligibleUtc"/>.</param>
+    public PasskeyException(PasskeyErrorCategory category, string? diagnosticMessage = null, Exception? innerException = null, string? backendCode = null, DateTime? eligibleUtc = null)
         : base(diagnosticMessage ?? $"Passkey operation failed: {category}.", innerException)
     {
         Category = category;
         BackendCode = backendCode;
+        EligibleUtc = eligibleUtc;
     }
+
+    /// <summary>When the refused request can succeed, if the backend said.</summary>
+    public DateTime? EligibleUtc { get; }
 
     /// <summary>The backend's coarse refusal code, if it sent one.</summary>
     public string? BackendCode { get; }

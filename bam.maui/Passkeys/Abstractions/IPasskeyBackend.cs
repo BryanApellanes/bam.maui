@@ -60,6 +60,18 @@ public interface IPasskeyBackend
     /// <returns>The registered passkeys, with only the metadata the server actually has.</returns>
     Task<IReadOnlyList<PasskeyCredential>> GetPasskeysAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Lists the signed-in account's passkeys with the state of its key set (a waiting lost-device recovery, and whether
+    /// one can start).  The default lists the passkeys and reports neither, for a backend that can't recover key sets.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The passkeys and the key set's state.</returns>
+    async Task<PasskeyList> GetPasskeyListAsync(CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<PasskeyCredential> passkeys = await GetPasskeysAsync(cancellationToken).ConfigureAwait(false);
+        return new PasskeyList { Passkeys = passkeys };
+    }
+
     /// <summary>Removes one of the signed-in account's passkeys on the server.  The credential may remain in the device's credential manager; only the server stops accepting it.</summary>
     /// <param name="credentialId">The credential id, as <see cref="PasskeyCredential.CredentialId"/> reported it.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
@@ -97,6 +109,30 @@ public interface IPasskeyBackend
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>Whether removing it ended this session (it does when the session was opened with it).</returns>
     Task<PasskeySignOut> CompleteKeySetHandoverAsync(string credentialId, PasskeyHandoverChallenge challenge, WebAuthnAssertionResponse response, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lost-device recovery: asks the server to move the key set to <paramref name="heirCredentialId"/> after its waiting
+    /// period, taking <paramref name="removedCredentialId"/> (the lost passkey that holds it) out of sign-in.  The server
+    /// answers with assertion options for the heir only.
+    /// </summary>
+    /// <param name="removedCredentialId">The lost passkey that holds the key set, or null when no passkey holds it any more.</param>
+    /// <param name="heirCredentialId">The passkey to move the key set to, or null for the one this session signed in with.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The challenge to hand to the authenticator.</returns>
+    Task<PasskeyRecoveryChallenge> BeginKeySetRecoveryAsync(string? removedCredentialId, string? heirCredentialId, CancellationToken cancellationToken = default);
+
+    /// <summary>Lost-device recovery: submits the heir's assertion; the server removes the lost passkey now and schedules the move.</summary>
+    /// <param name="challenge">The challenge the assertion answers, exactly as <see cref="BeginKeySetRecoveryAsync"/> returned it.</param>
+    /// <param name="response">The authenticator's assertion response.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Whether that ended this session, and when the key set moves.</returns>
+    Task<PasskeyRecoveryStarted> CompleteKeySetRecoveryAsync(PasskeyRecoveryChallenge challenge, WebAuthnAssertionResponse response, CancellationToken cancellationToken = default);
+
+    /// <summary>Cancels a waiting lost-device recovery.  Any of the person's sessions can.</summary>
+    /// <param name="recoveryId">The recovery's id, as <see cref="PasskeyPendingRecovery.RecoveryId"/> reported it.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task that completes when the server has cancelled it.</returns>
+    Task CancelKeySetRecoveryAsync(string recoveryId, CancellationToken cancellationToken = default);
 
     /// <summary>Renames one of the signed-in account's passkeys.</summary>
     /// <param name="credentialId">The credential id, as <see cref="PasskeyCredential.CredentialId"/> reported it.</param>

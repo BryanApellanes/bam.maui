@@ -29,7 +29,7 @@ public sealed class PasskeyErrorNormalizer
 
     /// <summary>
     /// The error for an exception.  <see cref="PasskeyException"/> keeps its category and its
-    /// <see cref="PasskeyException.BackendCode"/>; cancellation
+    /// <see cref="PasskeyException.BackendCode"/> and <see cref="PasskeyException.EligibleUtc"/>; cancellation
     /// becomes <see cref="PasskeyErrorCategory.UserCancelled"/> (<see cref="PasskeyClient"/> turns a
     /// backend cancellation the caller did not ask for into a network failure before it gets here); transport faults and timeouts
     /// become <see cref="PasskeyErrorCategory.NetworkFailure"/>; malformed data becomes
@@ -42,8 +42,8 @@ public sealed class PasskeyErrorNormalizer
     {
         ArgumentNullException.ThrowIfNull(exception);
         PasskeyErrorCategory category = Categorize(exception);
-        string? backendCode = (exception as PasskeyException)?.BackendCode;
-        return new PasskeyError(category, _messages.For(category), backendCode);
+        PasskeyException? passkeyException = exception as PasskeyException;
+        return new PasskeyError(category, _messages.For(category), passkeyException?.BackendCode, passkeyException?.EligibleUtc);
     }
 
     /// <summary>The category for an exception, by the rules <see cref="Normalize"/> documents.</summary>

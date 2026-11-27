@@ -269,6 +269,22 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
     protected virtual PasskeyViewState DismissedState => PasskeyViewState.Ready;
 
     /// <summary>
+    /// Where a quiet failure (the person cancelled) returns to.  The form, unless a derived screen is holding something the
+    /// person must still see, such as the sign-in screen's notice about a waiting key-set recovery.
+    /// </summary>
+    protected virtual PasskeyViewState QuietState => PasskeyViewState.Ready;
+
+    /// <summary>
+    /// Forgets what <see cref="TryAgainCommand"/> would run, for a screen that has moved somewhere a retry of the last
+    /// call no longer fits (the sign-in screen holding a sign-in on its notice).
+    /// </summary>
+    protected void ForgetLastAttempt()
+    {
+        _lastAttempt = null;
+        TryAgainCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>
     /// Puts a finished screen back to the form, for when it is shown again (a cached Shell page, a navigation root the
     /// app returns to after sign-out).  Does nothing while a ceremony runs.
     /// </summary>
@@ -415,7 +431,7 @@ public abstract class PasskeyFlowViewModel : INotifyPropertyChanged
         {
             Recovery = null;
             Note = plan.Message;
-            State = PasskeyViewState.Ready;
+            State = QuietState;
         }
         else
         {

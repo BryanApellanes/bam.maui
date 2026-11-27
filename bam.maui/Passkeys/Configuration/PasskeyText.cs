@@ -198,13 +198,80 @@ public sealed class PasskeyText
     public string RemoveWithoutMoving { get; set; } = "Remove without moving";
 
     /// <summary>What removing without moving does, shown beside <see cref="RemoveWithoutMoving"/>.</summary>
-    public string RemoveWithoutMovingMessage { get; set; } = "If you no longer have the device, remove it without moving. You can't sign in with it after that, but its key still counts as your account key until it is replaced, and you can't replace it here yet.";
+    public string RemoveWithoutMovingMessage { get; set; } = "If you no longer have the device, choose \"This device is lost\" to recover your account key instead. Remove it without moving only if you can't recover the key: you can't sign in with it after that, but its key still counts as your account key until it is replaced.";
 
     /// <summary>Shown when the server refuses the passkey chosen to hold the account key.</summary>
     public string AccountKeyHeirRefusedMessage { get; set; } = "That passkey can't hold your account key. Choose another one.";
 
     /// <summary>Shown when the account's passkeys changed while the account key was being moved; Back loads the list again.</summary>
     public string PasskeysChangedMessage { get; set; } = "Your passkeys changed while this was open. Check the list and try again.";
+
+    /// <summary>The action on the account-key passkey, and in the move panel, that starts a lost-device recovery.</summary>
+    public string LostDevice { get; set; } = "This device is lost";
+
+    /// <summary>The heading of the panel that recovers the account key, and the button that opens it when no passkey holds the key.</summary>
+    public string RecoverAccountKey { get; set; } = "Recover your account key";
+
+    /// <summary>What recovering the account key does.</summary>
+    public string RecoveryMessage { get; set; } = "Choose a passkey on this device to take over your account key, then confirm with it. The key moves after a waiting period, and you can cancel it until then.";
+
+    /// <summary>The recovery panel's extra line when a lost passkey is named: it stops signing in at once.</summary>
+    public string RecoveryLostMessage { get; set; } = "The lost passkey stops signing in as soon as you confirm.";
+
+    /// <summary>The button that starts the recovery.</summary>
+    public string StartRecovery { get; set; } = "Recover the key";
+
+    /// <summary>The heading shown when no passkey holds the account key and a recovery can start.</summary>
+    public string KeySetRecoverableTitle { get; set; } = "No passkey holds your account key";
+
+    /// <summary>What the person can do when no passkey holds the account key.</summary>
+    public string KeySetRecoverableMessage { get; set; } = "Choose one of your passkeys to take it over. The key moves after a waiting period, so there is time to cancel it if you didn't ask for it.";
+
+    /// <summary>
+    /// Shown when no passkey holds the account key and recovery can't move it (<see cref="PasskeyList.KeySetUnrecoverable"/>),
+    /// and when such a recovery is refused.  It isn't a fault: the key may be held by another device or by a key support set up.
+    /// Only someone who lost what holds it needs support, so a white-label app can name its own support channel here.
+    /// </summary>
+    public string KeySetUnrecoverableMessage { get; set; } = "Your account key is held somewhere other than your passkeys, such as another device or a key support set up, so it can't be moved from here. If you've lost what holds it, contact support.";
+
+    /// <summary>The heading of the notice about a recovery that is waiting.</summary>
+    public string PendingRecoveryTitle { get; set; } = "Your account key is moving";
+
+    /// <summary>The notice about a waiting recovery.  <c>{0}</c> is the passkey it moves to, <c>{1}</c> when.</summary>
+    public string PendingRecoveryMessage { get; set; } = "Your account key moves to {0} on {1}. Until then you can cancel it here or on any device you're signed in on. If you didn't start this, cancel it and remove that passkey.";
+
+    /// <summary>The sign-in screen's notice about a waiting recovery.  <c>{0}</c> is when the key moves.</summary>
+    public string SignInPendingRecoveryMessage { get; set; } = "Your account key is set to move to another of your passkeys on {0}. If you didn't start this, cancel it and remove the passkey it moves to.";
+
+    /// <summary>The sign-in notice's extra line when this app doesn't manage passkeys, so it can't cancel the move itself.</summary>
+    public string SignInPendingRecoveryElsewhereMessage { get; set; } = "If you didn't start this, cancel it where you manage your passkeys, and remove the passkey it moves to.";
+
+    /// <summary>The button on the sign-in notice that goes on into the app.</summary>
+    public string ContinueSignedIn { get; set; } = "Continue";
+
+    /// <summary>Shown when the recovery to cancel is no longer waiting; Back returns to the notice.</summary>
+    public string RecoveryGoneMessage { get; set; } = "That move is no longer waiting. Check your passkeys once you're in.";
+
+    /// <summary>
+    /// Stands in for the passkey a waiting recovery moves to when it isn't in the list, so it doesn't read like an
+    /// ordinary unnamed passkey.
+    /// </summary>
+    public string UnlistedHeir { get; set; } = "a passkey that isn't in your list";
+
+    /// <summary>The button that cancels a waiting recovery.</summary>
+    public string CancelRecovery { get; set; } = "Cancel the move";
+
+    /// <summary>Shown when the chosen passkey is too new to take over the account key.  <c>{0}</c> is when it can.</summary>
+    public string RecoveryHeirTooNewMessage { get; set; } = "That passkey is too new to take over your account key. It can from {0}. Choose another one.";
+
+    /// <summary>Shown when the chosen passkey is too new to take over the account key and the backend didn't say when it can.</summary>
+    public string RecoveryHeirTooNewLaterMessage { get; set; } = "That passkey is too new to take over your account key yet. Choose another one.";
+
+    /// <summary>Shown when a move of the account key is already waiting; Back loads the list again.</summary>
+    public string RecoveryPendingMessage { get; set; } = "A move of your account key is already waiting. Check the list.";
+
+    /// <summary>Shown when this app's backend can't recover the account key; Back loads the list again.</summary>
+    public string RecoveryUnavailableMessage { get; set; } = "Your account key can't be recovered here.";
 
     /// <summary>The button that loads the list again.</summary>
     public string Refresh { get; set; } = "Refresh";

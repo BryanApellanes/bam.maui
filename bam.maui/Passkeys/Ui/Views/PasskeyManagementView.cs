@@ -4,7 +4,7 @@ namespace Bam.Maui.Passkeys;
 /// The passkey management screen as a reusable view: heading, the list of passkeys (name, when it was added, when it
 /// was last used, the device when the backend reports one, and a tag on the one this session used), each with Rename
 /// and Remove; the empty state; adding another passkey; the rename panel; the removal confirmation; Refresh and Sign
-/// out.  Host it in any page, or use <see cref="PasskeyManagementPage"/>.  Call
+/// out; the account-key move panel, the lost-device recovery panel, and the notice about a waiting recovery.  Host it in any page, or use <see cref="PasskeyManagementPage"/>.  Call
 /// <see cref="PasskeyManagementViewModel.LoadAsync"/> when it appears.
 /// </summary>
 public sealed class PasskeyManagementView : PasskeyScreenLayout
@@ -32,6 +32,52 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
         Label note = PasskeyViewParts.Body(nameof(PasskeyFlowViewModel.Note), PasskeyResourceKeys.Text);
         PasskeyViewParts.ShowWhen(note, nameof(PasskeyFlowViewModel.HasNote));
         screen.Children.Add(note);
+
+        // A waiting recovery comes first: if the person didn't start it, cancelling it is the most important thing here.
+        Label pendingTitle = PasskeyViewParts.Fixed(text.PendingRecoveryTitle, 20, PasskeyResourceKeys.Text);
+        SemanticProperties.SetHeadingLevel(pendingTitle, SemanticHeadingLevel.Level2);
+        VerticalStackLayout pending = new VerticalStackLayout
+        {
+            Spacing = 12,
+            Children =
+            {
+                pendingTitle,
+                PasskeyViewParts.Body(nameof(PasskeyManagementViewModel.PendingRecoveryText), PasskeyResourceKeys.Text),
+                PasskeyViewParts.Primary(text.CancelRecovery, nameof(PasskeyManagementViewModel.CancelRecoveryCommand))
+            }
+        };
+        PasskeyViewParts.ShowWhen(pending, nameof(PasskeyManagementViewModel.ShowsPendingRecovery));
+        screen.Children.Add(pending);
+
+        Label recoverableTitle = PasskeyViewParts.Fixed(text.KeySetRecoverableTitle, 20, PasskeyResourceKeys.Text);
+        SemanticProperties.SetHeadingLevel(recoverableTitle, SemanticHeadingLevel.Level2);
+        VerticalStackLayout recoverable = new VerticalStackLayout
+        {
+            Spacing = 12,
+            Children =
+            {
+                recoverableTitle,
+                PasskeyViewParts.Fixed(text.KeySetRecoverableMessage),
+                PasskeyViewParts.Primary(text.RecoverAccountKey, nameof(PasskeyManagementViewModel.OpenRecoveryCommand))
+            }
+        };
+        PasskeyViewParts.ShowWhen(recoverable, nameof(PasskeyManagementViewModel.ShowsRecoverable));
+        screen.Children.Add(recoverable);
+
+        // Same heading, but nothing to press: something other than a passkey holds the key.  Plain text, not an error.
+        Label unrecoverableTitle = PasskeyViewParts.Fixed(text.KeySetRecoverableTitle, 20, PasskeyResourceKeys.Text);
+        SemanticProperties.SetHeadingLevel(unrecoverableTitle, SemanticHeadingLevel.Level2);
+        VerticalStackLayout unrecoverable = new VerticalStackLayout
+        {
+            Spacing = 12,
+            Children =
+            {
+                unrecoverableTitle,
+                PasskeyViewParts.Fixed(text.KeySetUnrecoverableMessage)
+            }
+        };
+        PasskeyViewParts.ShowWhen(unrecoverable, nameof(PasskeyManagementViewModel.ShowsUnrecoverable));
+        screen.Children.Add(unrecoverable);
 
         VerticalStackLayout list = new VerticalStackLayout { Spacing = 12 };
         BindableLayout.SetItemsSource(list, viewModel.Passkeys);
@@ -100,11 +146,7 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
 
         Label moveTitle = PasskeyViewParts.Fixed(text.MoveAccountKeyTitle, 20, PasskeyResourceKeys.Text);
         SemanticProperties.SetHeadingLevel(moveTitle, SemanticHeadingLevel.Level2);
-        Picker heir = new Picker { Title = text.MoveAccountKeyTo, MinimumHeightRequest = PasskeyViewParts.MinimumTouchTarget, ItemDisplayBinding = new Binding(nameof(PasskeyItem.Title)) };
-        heir.SetBinding(Picker.ItemsSourceProperty, nameof(PasskeyManagementViewModel.HeirChoices));
-        heir.SetBinding(Picker.SelectedItemProperty, nameof(PasskeyManagementViewModel.SelectedHeir), BindingMode.TwoWay);
-        heir.SetDynamicResource(Picker.TextColorProperty, PasskeyResourceKeys.Text);
-        heir.SetDynamicResource(Picker.FontFamilyProperty, PasskeyResourceKeys.FontFamily);
+        Picker heir = HeirPicker(text);
         VerticalStackLayout handover = new VerticalStackLayout
         {
             Spacing = 12,
@@ -115,6 +157,7 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
                 PasskeyViewParts.Fixed(text.MoveAccountKeyTo, 14, PasskeyResourceKeys.Text),
                 heir,
                 PasskeyViewParts.Primary(text.MoveAccountKey, nameof(PasskeyManagementViewModel.MoveAccountKeyCommand)),
+                PasskeyViewParts.Secondary(text.LostDevice, nameof(PasskeyManagementViewModel.LostDeviceCommand)),
                 PasskeyViewParts.Fixed(text.RemoveWithoutMovingMessage),
                 PasskeyViewParts.Secondary(text.RemoveWithoutMoving, nameof(PasskeyManagementViewModel.RemoveWithoutMovingCommand)),
                 PasskeyViewParts.Link(text.Keep, nameof(PasskeyManagementViewModel.CancelHandoverCommand))
@@ -122,6 +165,39 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
         };
         PasskeyViewParts.ShowWhen(handover, nameof(PasskeyManagementViewModel.ShowsHandover));
         screen.Children.Add(handover);
+
+        Label recoveryTitle = PasskeyViewParts.Fixed(text.RecoverAccountKey, 20, PasskeyResourceKeys.Text);
+        SemanticProperties.SetHeadingLevel(recoveryTitle, SemanticHeadingLevel.Level2);
+        Label lostNote = PasskeyViewParts.Fixed(text.RecoveryLostMessage, 16, PasskeyResourceKeys.Text);
+        PasskeyViewParts.ShowWhen(lostNote, nameof(PasskeyManagementViewModel.HasRecoveryRemoves));
+        Picker recoveryHeir = HeirPicker(text);
+        VerticalStackLayout keepLost = new VerticalStackLayout
+        {
+            Spacing = 12,
+            Children =
+            {
+                PasskeyViewParts.Fixed(text.RemoveWithoutMovingMessage),
+                PasskeyViewParts.Secondary(text.RemoveWithoutMoving, nameof(PasskeyManagementViewModel.RemoveLostWithoutMovingCommand))
+            }
+        };
+        PasskeyViewParts.ShowWhen(keepLost, nameof(PasskeyManagementViewModel.HasRecoveryRemoves));
+        VerticalStackLayout recovery = new VerticalStackLayout
+        {
+            Spacing = 12,
+            Children =
+            {
+                recoveryTitle,
+                PasskeyViewParts.Fixed(text.RecoveryMessage),
+                lostNote,
+                PasskeyViewParts.Fixed(text.MoveAccountKeyTo, 14, PasskeyResourceKeys.Text),
+                recoveryHeir,
+                PasskeyViewParts.Primary(text.StartRecovery, nameof(PasskeyManagementViewModel.StartRecoveryCommand)),
+                keepLost,
+                PasskeyViewParts.Link(text.Cancel, nameof(PasskeyManagementViewModel.CloseRecoveryCommand))
+            }
+        };
+        PasskeyViewParts.ShowWhen(recovery, nameof(PasskeyManagementViewModel.ShowsRecovery));
+        screen.Children.Add(recovery);
 
         screen.Children.Add(PasskeyViewParts.Link(text.Refresh, nameof(PasskeyManagementViewModel.RefreshCommand)));
         screen.Children.Add(PasskeyViewParts.Secondary(text.SignOut, nameof(PasskeyManagementViewModel.SignOutCommand)));
@@ -171,6 +247,9 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
                     PasskeyViewParts.Link(text.Remove, nameof(PasskeyItem.RemoveCommand))
                 }
             };
+            Button lost = PasskeyViewParts.Link(text.LostDevice, nameof(PasskeyItem.LostCommand));
+            lost.SetBinding(VisualElement.IsVisibleProperty, nameof(PasskeyItem.OffersLost));
+            actions.Children.Add(lost);
             return new VerticalStackLayout
             {
                 Spacing = 4,
@@ -178,5 +257,16 @@ public sealed class PasskeyManagementView : PasskeyScreenLayout
                 Children = { title, current, accountKey, added, used, device, actions }
             };
         }
+    }
+
+    // The choice of passkey to take the account key: the move panel and the recovery panel share the view model's list.
+    private static Picker HeirPicker(PasskeyText text)
+    {
+        Picker heir = new Picker { Title = text.MoveAccountKeyTo, MinimumHeightRequest = PasskeyViewParts.MinimumTouchTarget, ItemDisplayBinding = new Binding(nameof(PasskeyItem.Title)) };
+        heir.SetBinding(Picker.ItemsSourceProperty, nameof(PasskeyManagementViewModel.HeirChoices));
+        heir.SetBinding(Picker.SelectedItemProperty, nameof(PasskeyManagementViewModel.SelectedHeir), BindingMode.TwoWay);
+        heir.SetDynamicResource(Picker.TextColorProperty, PasskeyResourceKeys.Text);
+        heir.SetDynamicResource(Picker.FontFamilyProperty, PasskeyResourceKeys.FontFamily);
+        return heir;
     }
 }

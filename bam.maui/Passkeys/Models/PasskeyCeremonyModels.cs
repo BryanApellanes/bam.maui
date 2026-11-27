@@ -69,6 +69,12 @@ public sealed record PasskeySignIn
     /// otherwise, and whenever the backend doesn't say.
     /// </summary>
     public bool ProfileCreated { get; init; } = true;
+
+    /// <summary>
+    /// A lost-device recovery of the account's key set that is waiting, or null.  The backend reports it on every
+    /// sign-in so the person can cancel a recovery they didn't start; the sign-in screen shows it before handing over.
+    /// </summary>
+    public PasskeyPendingRecovery? PendingRecovery { get; init; }
 }
 
 /// <summary>
@@ -100,6 +106,30 @@ public sealed record PasskeyCredential
 
     /// <summary>Whether the passkey is the account's registered key set (its first passkey), if the backend reported it.</summary>
     public bool? IsRegisteredKeySet { get; init; }
+}
+
+/// <summary>
+/// The signed-in account's passkeys, with the state of its key set: a lost-device recovery that is waiting, and whether
+/// one can start.  A backend that can't recover key sets reports neither.
+/// </summary>
+public sealed record PasskeyList
+{
+    /// <summary>The registered passkeys, oldest first.</summary>
+    public IReadOnlyList<PasskeyCredential> Passkeys { get; init; } = Array.Empty<PasskeyCredential>();
+
+    /// <summary>The waiting recovery, or null.</summary>
+    public PasskeyPendingRecovery? PendingRecovery { get; init; }
+
+    /// <summary>Whether a recovery can start because no passkey holds the key set (its passkey was removed without moving it).</summary>
+    public bool KeySetRecoverable { get; init; }
+
+    /// <summary>
+    /// Whether the person has a key set that no passkey holds and that recovery can't move: it isn't a removed passkey's
+    /// recorded key (another device's key, or one support set up), or this host can't recover.  Information, not a fault: only
+    /// someone who lost what holds the key needs support.  Omitted on the wire when false.  Never true together with
+    /// <see cref="KeySetRecoverable"/>, and false while a recovery waits or when there's no key set.
+    /// </summary>
+    public bool KeySetUnrecoverable { get; init; }
 }
 
 /// <summary>What a sign-out, or the removal of a passkey, did to the session.</summary>

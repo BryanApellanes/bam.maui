@@ -45,6 +45,14 @@ public sealed class FakePasskeyBackend : IPasskeyBackend
     public string? HandoverHeir { get; private set; }
     public PasskeyHandoverChallenge? CompletedHandover { get; private set; }
     public PasskeySignOut HandoverResult { get; set; } = new PasskeySignOut { SignedOut = false };
+    public PasskeyPendingRecovery? PendingRecovery { get; set; }
+    public bool KeySetRecoverable { get; set; }
+    public string? RecoveryRemoves { get; private set; }
+    public string? RecoveryHeir { get; private set; }
+    public PasskeyRecoveryChallenge? CompletedRecovery { get; private set; }
+    public PasskeyRecoveryStarted RecoveryResult { get; set; } = new PasskeyRecoveryStarted { SignOut = new PasskeySignOut { SignedOut = false }, EffectiveUtc = new DateTime(2026, 11, 29, 12, 0, 0, DateTimeKind.Utc) };
+    public bool ReturnNullRecovery { get; set; }
+    public string? CancelledRecoveryId { get; private set; }
     public string AddedCredentialId { get; set; } = "added-1";
     public PasskeySignOut DeleteResult { get; set; } = new PasskeySignOut { SignedOut = false };
     public PasskeySignOut SignOutResult { get; set; } = new PasskeySignOut { SignedOut = true, NextUrl = "/account/signedout" };
@@ -106,6 +114,38 @@ public sealed class FakePasskeyBackend : IPasskeyBackend
         Enter("backend.getPasskeys");
         IReadOnlyList<PasskeyCredential> credentials = Credentials;
         return Task.FromResult(credentials);
+    }
+
+    public Task<PasskeyList> GetPasskeyListAsync(CancellationToken cancellationToken = default)
+    {
+        Enter("backend.getPasskeyList");
+        return Task.FromResult(new PasskeyList { Passkeys = Credentials, PendingRecovery = PendingRecovery, KeySetRecoverable = KeySetRecoverable });
+    }
+
+    public Task<PasskeyRecoveryChallenge> BeginKeySetRecoveryAsync(string? removedCredentialId, string? heirCredentialId, CancellationToken cancellationToken = default)
+    {
+        Enter("backend.beginRecovery");
+        RecoveryRemoves = removedCredentialId;
+        RecoveryHeir = heirCredentialId;
+        PasskeyRecoveryChallenge challenge = ReturnNullOptions
+            ? null!
+            : new PasskeyRecoveryChallenge { Options = new WebAuthnRequestOptions("{\"challenge\":\"recovery\"}"), RecoveryId = "recovery-1" };
+        return Task.FromResult(challenge);
+    }
+
+    public Task<PasskeyRecoveryStarted> CompleteKeySetRecoveryAsync(PasskeyRecoveryChallenge challenge, WebAuthnAssertionResponse response, CancellationToken cancellationToken = default)
+    {
+        Enter("backend.completeRecovery");
+        CompletedRecovery = challenge;
+        CompletedAssertionJson = response.Json;
+        return Task.FromResult(ReturnNullRecovery ? null! : RecoveryResult);
+    }
+
+    public Task CancelKeySetRecoveryAsync(string recoveryId, CancellationToken cancellationToken = default)
+    {
+        Enter("backend.cancelRecovery");
+        CancelledRecoveryId = recoveryId;
+        return Task.CompletedTask;
     }
 
     public Task<PasskeySignOut> DeletePasskeyAsync(string credentialId, PasskeyKeySetRemoval keySet, CancellationToken cancellationToken = default)
