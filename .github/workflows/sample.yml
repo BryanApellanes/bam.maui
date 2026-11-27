@@ -1,0 +1,113 @@
+# Builds the white-label sample app (bam.maui#23) and runs the library tests on every pull request to main. A tag
+# sample-v* also publishes a signed Android APK and a Windows zip to a GitHub Release.
+# bam.maui builds inside bamtk (its framework references are bamtk's sibling submodules), so the job checks bamtk
+# out and puts this repository at submodules/bam.maui.
+name: sample
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths-ignore:
+      - "**.md"
+      - ".github/workflows/pages.yml"
+  push:
+    tags: [ "sample-v*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sample-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write   # gh release create, tags only
+    env:
+      BAM_ARG_STYLE: Posix
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+    steps:
+      - name: Check out bamtk
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: BryanApellanes/bamtk
+          ref: bamtk
+          path: bamtk
+          submodules: false
+          persist-credentials: false
+
+      - name: Check out this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: bamtk/submodules/bam.maui
+          persist-credentials: false
+
+      - name: Check out the framework bam.maui uses
+        working-directory: bamtk
+        shell: bash
+        run: bash submodules/bam.maui/build/init-framework.sh --depth 1
+
+      - name: Install .NET 10 and the MAUI workload
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://dot.net/v1/dotnet-install.ps1 -OutFile "$env:RUNNER_TEMP\dotnet-install.ps1"
+          & "$env:RUNNER_TEMP\dotnet-install.ps1" -Channel 10.0 -InstallDir "$env:RUNNER_TEMP\dotnet"
+          "$env:RUNNER_TEMP\dotnet" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & "$env:RUNNER_TEMP\dotnet\dotnet.exe" workload install maui --skip-sign-check
+
+      - name: Test
+        working-directory: bamtk/submodules/bam.maui
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build bam.maui.tests/bam.maui.tests.csproj -c Debug -nologo
+          dotnet run --no-build --project bam.maui.tests/bam.maui.tests.csproj -- --ut | tee "$RUNNER_TEMP/tests.txt"
+          # bamtest ends with "Test Summary: <n> passed, <n> failed, <n> skipped".
+          grep -q -E "Test Summary: [0-9]+ passed, 0 failed" "$RUNNER_TEMP/tests.txt"
+
+      - name: Prepare the Android signing key
+        if: startsWith(github.ref, 'refs/tags/sample-v')
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.BAM_SAMPLE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::BAM_SAMPLE_KEYSTORE_BASE64 is not set. A release must be signed with the key whose fingerprint is in assetlinks.json."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/sample.keystore"
+          echo "BAM_SAMPLE_KEYSTORE=$RUNNER_TEMP/sample.keystore" >> "$GITHUB_ENV"
+
+      - name: Build Android
+        working-directory: bamtk/submodules/bam.maui
+        shell: bash
+        env:
+          BAM_SAMPLE_KEY_ALIAS: ${{ secrets.BAM_SAMPLE_KEY_ALIAS }}
+          BAM_SAMPLE_KEYSTORE_PASSWORD: ${{ secrets.BAM_SAMPLE_KEYSTORE_PASSWORD }}
+          BAM_SAMPLE_KEY_PASSWORD: ${{ secrets.BAM_SAMPLE_KEY_PASSWORD }}
+        run: dotnet publish bam.maui.sample/bam.maui.sample.csproj -f net10.0-android -c Release -o "$RUNNER_TEMP/android" -nologo
+
+      - name: Build Windows
+        working-directory: bamtk/submodules/bam.maui
+        shell: bash
+        run: dotnet publish bam.maui.sample/bam.maui.sample.csproj -f net10.0-windows10.0.19041.0 -c Release -o "$RUNNER_TEMP/windows" -nologo
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/sample-v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          apk=$(ls "$RUNNER_TEMP"/android/*-Signed.apk | head -1)
+          cp "$apk" "$RUNNER_TEMP/passkey-sample-$TAG.apk"
+          (cd "$RUNNER_TEMP/windows" && 7z a -tzip "$RUNNER_TEMP/passkey-sample-$TAG-windows-x64.zip" . > /dev/null)
+          rm -f "$RUNNER_TEMP/sample.keystore"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Passkey sample $TAG" --notes "Install steps: bam.maui.sample/README.md." \
+            "$RUNNER_TEMP/passkey-sample-$TAG.apk" "$RUNNER_TEMP/passkey-sample-$TAG-windows-x64.zip"

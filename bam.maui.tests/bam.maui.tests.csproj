@@ -15,4 +15,12 @@
     <ProjectReference Include="..\bam.maui\bam.maui.csproj" />
   </ItemGroup>
 
+  <!-- The sample app's platform-free parts, compiled in so its settings and text are tested without a device. -->
+  <ItemGroup>
+    <Compile Include="..\bam.maui.sample\SampleSettings.cs" Link="Sample\SampleSettings.cs" />
+    <Compile Include="..\bam.maui.sample\SampleNavigator.cs" Link="Sample\SampleNavigator.cs" />
+    <Compile Include="..\bam.maui.sample\SignedInPage.cs" Link="Sample\SignedInPage.cs" />
+    <EmbeddedResource Include="..\bam.maui.sample\samplesettings.json" LogicalName="samplesettings.json" Link="Sample\samplesettings.json" />
+  </ItemGroup>
+
 </Project>

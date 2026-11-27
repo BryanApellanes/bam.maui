@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<!-- Android and Windows only: iOS and Mac Catalyst need an Apple developer account (bam.maui#23). -->
+		<TargetFrameworks>net10.0-android</TargetFrameworks>
+		<TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+		<OutputType>Exe</OutputType>
+		<RootNamespace>Bam.Maui.Sample</RootNamespace>
+		<UseMaui>true</UseMaui>
+		<SingleProject>true</SingleProject>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+		<ApplicationTitle>Passkey Sample</ApplicationTitle>
+		<!-- Public and permanent once released: it goes into the relying party's assetlinks.json. -->
+		<ApplicationId>net.bamapps.passkeysample</ApplicationId>
+		<ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
+		<ApplicationVersion>1</ApplicationVersion>
+
+		<!-- Unpackaged on Windows: a zip on the GitHub Release, no Store certificate. -->
+		<WindowsPackageType>None</WindowsPackageType>
+
+		<!-- Credential Manager passkeys need API 28 to sign in and API 34 for the platform provider; older devices get
+		     the library's not-supported screen. -->
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">28.0</SupportedOSPlatformVersion>
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
+		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+	</PropertyGroup>
+
+	<!-- Release signing for Android comes from the environment (CI secrets, or the local secrets hand-off); nothing about
+	     the key is in the repo.  Without the variables the build is debug-signed. -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release' And '$(BAM_SAMPLE_KEYSTORE)' != ''">
+		<AndroidKeyStore>true</AndroidKeyStore>
+		<AndroidSigningKeyStore>$(BAM_SAMPLE_KEYSTORE)</AndroidSigningKeyStore>
+		<AndroidSigningKeyAlias>$(BAM_SAMPLE_KEY_ALIAS)</AndroidSigningKeyAlias>
+		<AndroidSigningStorePass>env:BAM_SAMPLE_KEYSTORE_PASSWORD</AndroidSigningStorePass>
+		<AndroidSigningKeyPass>env:BAM_SAMPLE_KEY_PASSWORD</AndroidSigningKeyPass>
+		<AndroidPackageFormats>apk</AndroidPackageFormats>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#2457C5" />
+		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#2457C5" BaseSize="128,128" />
+		<EmbeddedResource Include="samplesettings.json" LogicalName="samplesettings.json" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Maui.Controls" Version="10.0.20" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\bam.maui\bam.maui.csproj" />
+		<ProjectReference Include="$(BamFrameworkRoot)bam.base\bam.base\bam.base.csproj" />
+	</ItemGroup>
+
+</Project>

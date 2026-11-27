@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Installable sample app (bam.maui#23)
+
+Added
+- **`bam.maui.sample`:** a MAUI app on `Bam.Maui.Passkeys` for Android (API 28 and later) and Windows. It covers sign-up, sign-in, passkey management, account-key moves and lost-device recovery, on a real device.
+  - Its brand comes only from `samplesettings.json`: the relying-party id (`whoiam.is` by default), the account endpoint, `PasskeyBranding` and `askForEmail`. Unknown keys are refused.
+  - The signed-in page shows only the name and handle the backend sent.
+  - Android backup is off.
+  - The package is `net.bamapps.passkeysample`.
+- **`build/init-framework.sh`:** checks out the framework submodules bam.maui builds against, run from the bamtk root.
+- **The `sample` workflow:** builds both apps and runs the tests on every pull request to main. A `sample-v*` tag publishes a signed APK and a Windows zip to a GitHub Release. The signing key comes from repository secrets, and a release without it is refused.
+- **Tests:** `SampleAppShould` (pksa) covers the bundled defaults, a brand on its own domain, refused settings, and the signed-in text.
+
 ### Key-set recovery (bam.maui#20, against bam.useraccounts#27)
 
 Added
