@@ -20,7 +20,9 @@
     <Compile Include="..\bam.maui.sample\SampleSettings.cs" Link="Sample\SampleSettings.cs" />
     <Compile Include="..\bam.maui.sample\SampleNavigator.cs" Link="Sample\SampleNavigator.cs" />
     <Compile Include="..\bam.maui.sample\SignedInPage.cs" Link="Sample\SignedInPage.cs" />
-    <EmbeddedResource Include="..\bam.maui.sample\samplesettings.json" LogicalName="samplesettings.json" Link="Sample\samplesettings.json" />
+    <EmbeddedResource Include="..\bam.maui.sample\samplesettings.prod.json" LogicalName="samplesettings.json" Link="Sample\samplesettings.prod.json" />
+    <EmbeddedResource Include="..\bam.maui.sample\samplesettings.test.json" LogicalName="samplesettings.test.json" Link="Sample\samplesettings.test.json" />
+    <EmbeddedResource Include="..\bam.maui.sample\samplesettings.dev.json" LogicalName="samplesettings.dev.json" Link="Sample\samplesettings.dev.json" />
   </ItemGroup>
 
 </Project>

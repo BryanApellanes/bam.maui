@@ -60,11 +60,10 @@ public sealed class SampleNavigator : IPasskeyNavigator
 
     private Task ShowRootAsync(Page page)
     {
-        Window? window = _window();
-        if (window is not null)
-        {
-            window.Page = page;
-        }
+        // A move with no window to make it in fails, so the library's screen reports a navigation failure instead of
+        // waiting on a move that never happened.
+        Window window = _window() ?? throw new InvalidOperationException("The app has no window to navigate in yet.");
+        window.Page = page;
         return Task.CompletedTask;
     }
 }

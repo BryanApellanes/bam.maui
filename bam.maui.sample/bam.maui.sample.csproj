@@ -12,9 +12,16 @@
 		<Nullable>enable</Nullable>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 
-		<ApplicationTitle>Passkey Sample</ApplicationTitle>
-		<!-- Public and permanent once released: it goes into the relying party's assetlinks.json. -->
-		<ApplicationId>net.bamapps.passkeysample</ApplicationId>
+		<!-- The deployment level: dev, test or prod, each its own relying party (bam.useraccounts#37).  Debug builds dev
+		     and Release builds prod unless -p:BamSampleLevel says otherwise. -->
+		<BamSampleLevel Condition="'$(BamSampleLevel)' == '' And '$(Configuration)' == 'Release'">prod</BamSampleLevel>
+		<BamSampleLevel Condition="'$(BamSampleLevel)' == ''">dev</BamSampleLevel>
+		<!-- Public and permanent once released: each level's id goes into that level's assetlinks.json.  dev and test
+		     carry a suffix so they install beside prod. -->
+		<ApplicationId Condition="'$(BamSampleLevel)' == 'prod'">net.bamapps.passkeysample</ApplicationId>
+		<ApplicationId Condition="'$(BamSampleLevel)' != 'prod'">net.bamapps.passkeysample.$(BamSampleLevel)</ApplicationId>
+		<ApplicationTitle Condition="'$(BamSampleLevel)' == 'prod'">Passkey Sample</ApplicationTitle>
+		<ApplicationTitle Condition="'$(BamSampleLevel)' != 'prod'">Passkey Sample ($(BamSampleLevel))</ApplicationTitle>
 		<ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
 		<ApplicationVersion>1</ApplicationVersion>
 
@@ -26,6 +33,14 @@
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">28.0</SupportedOSPlatformVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+	</PropertyGroup>
+
+	<!-- A Windows Release build carries .NET and the Windows App SDK with it, so the zip runs on a machine with neither.
+	     It's set here, not on the command line, so it doesn't reach the library project, which has no architecture. -->
+	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows' And '$(Configuration)' == 'Release'">
+		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
+		<SelfContained>true</SelfContained>
+		<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
 	</PropertyGroup>
 
 	<!-- Release signing for Android comes from the environment (CI secrets, or the local secrets hand-off); nothing about
@@ -42,8 +57,12 @@
 	<ItemGroup>
 		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#2457C5" />
 		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#2457C5" BaseSize="128,128" />
-		<EmbeddedResource Include="samplesettings.json" LogicalName="samplesettings.json" />
+		<EmbeddedResource Include="samplesettings.$(BamSampleLevel).json" LogicalName="samplesettings.json" />
 	</ItemGroup>
+
+	<Target Name="BamSampleCheckLevel" BeforeTargets="PrepareForBuild">
+		<Error Condition="'$(BamSampleLevel)' != 'dev' And '$(BamSampleLevel)' != 'test' And '$(BamSampleLevel)' != 'prod'" Text="BamSampleLevel must be dev, test or prod, not '$(BamSampleLevel)'." />
+	</Target>
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="10.0.20" />

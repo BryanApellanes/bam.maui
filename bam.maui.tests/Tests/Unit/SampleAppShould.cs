@@ -2,6 +2,7 @@ using System.Text;
 using Bam.DependencyInjection;
 using Bam.Maui.Passkeys;
 using Bam.Maui.Sample;
+using Bam.Maui.Tests.TestClasses;
 using Bam.Test;
 
 namespace Bam.Maui.Tests.Unit;
@@ -12,21 +13,21 @@ public class SampleAppShould : UnitTestMenuContainer
     public SampleAppShould(ServiceRegistry serviceRegistry) : base(serviceRegistry) { }
 
     [UnitTest]
-    public void SignInToWhoiamIsByDefault()
+    public void GiveEachLevelItsOwnRelyingParty()
     {
         After.Setup(reg => reg.Set(SampleSettings.ReadBundled()))
-        .When<SampleSettings>("reads the bundled settings and builds the configuration", (settings, reg) =>
+        .When<SampleSettings>("reads the prod, test and dev settings and builds each backend", (prod, reg) =>
         {
-            PasskeyConfiguration configuration = settings.ToConfiguration();
-            PasskeyHttpBackendOptions options = settings.ToBackendOptions();
-            return new DefaultOutcome(configuration.RelyingPartyId, configuration.Branding.ApplicationName, options.AccountEndpoint is null, configuration.Experience.AskForEmail);
+            SampleSettings test = Bundled("samplesettings.test.json");
+            SampleSettings dev = Bundled("samplesettings.dev.json");
+            return new LevelOutcome(Describe(prod), Describe(test), Describe(dev), prod.ToConfiguration().Experience.AskForEmail);
         })
         .TheTest
-        .ShouldPass<DefaultOutcome>((because, outcome) =>
+        .ShouldPass<LevelOutcome>((because, outcome) =>
         {
-            because.ItsTrue("the default brand is whoiam.is: " + outcome.RelyingPartyId, outcome.RelyingPartyId == "whoiam.is");
-            because.ItsTrue("the app names itself from the settings: " + outcome.ApplicationName, outcome.ApplicationName == "Passkey Sample");
-            because.ItsTrue("the endpoint defaults to the relying party's /account/", outcome.DefaultEndpoint);
+            because.ItsTrue("prod signs in to whoiam.is through www: " + outcome.Prod, outcome.Prod == "whoiam.is|https://www.whoiam.is/account/|Passkey Sample");
+            because.ItsTrue("test is its own relying party: " + outcome.Test, outcome.Test == "test.whoiam.is|https://test.whoiam.is/account/|Passkey Sample (test)");
+            because.ItsTrue("dev is its own relying party: " + outcome.Dev, outcome.Dev == "dev.whoiam.is|https://dev.whoiam.is/account/|Passkey Sample (dev)");
             because.ItsTrue("sign-up doesn't ask for email unless the settings say so", !outcome.AskForEmail);
         })
         .SoBeHappy()
@@ -70,7 +71,11 @@ public class SampleAppShould : UnitTestMenuContainer
                 ConfigurationRefused("{\"relyingPartyId\":\"\"}"),
                 OptionsRefused("{\"accountEndpoint\":\"not a uri\"}"),
                 BackendRefused("{\"relyingPartyId\":\"acme.example\",\"accountEndpoint\":\"https://evil.example/account/\"}"),
-                BackendRefused("{\"relyingPartyId\":\"acme.example\",\"accountEndpoint\":\"http://acme.example/account/\"}"));
+                BackendRefused("{\"relyingPartyId\":\"acme.example\",\"accountEndpoint\":\"http://acme.example/account/\"}"),
+                ReadRefused("{\"relyingPartyId\":\"acme.example\",\"relyingPartyId\":\"evil.example\"}"),
+                ReadRefused("{\"branding\":{\"themeMode\":2}}"),
+                ReadRefused("{\"branding\":{\"themeMode\":\"Sepia\"}}"),
+                Read("{\"branding\":{\"themeMode\":\"Dark\"}}").Branding.ThemeMode == PasskeyThemeMode.Dark);
         })
         .TheTest
         .ShouldPass<RefusalOutcome>((because, outcome) =>
@@ -83,6 +88,10 @@ public class SampleAppShould : UnitTestMenuContainer
             because.ItsTrue("an endpoint that isn't a URI is refused", outcome.EndpointNotUri);
             because.ItsTrue("an endpoint off the relying party is refused", outcome.EndpointOffSite);
             because.ItsTrue("an endpoint over plain http is refused", outcome.EndpointNotHttps);
+            because.ItsTrue("a key given twice is refused", outcome.DuplicateKey);
+            because.ItsTrue("a theme mode given as a number is refused", outcome.NumericThemeMode);
+            because.ItsTrue("an undefined theme mode is refused", outcome.UndefinedThemeMode);
+            because.ItsTrue("a theme mode is read by its name", outcome.NamedThemeMode);
         })
         .SoBeHappy()
         .UnlessItFailed();
@@ -108,6 +117,90 @@ public class SampleAppShould : UnitTestMenuContainer
         })
         .SoBeHappy()
         .UnlessItFailed();
+    }
+
+    [UnitTest]
+    public void MoveBetweenTheScreens()
+    {
+        After.Setup(reg => reg.Set(new CallLog()))
+        .When<CallLog>("signs in, opens management, signs out, then signs out while the server fails", (log, reg) =>
+        {
+            FakePasskeyBackend backend = new FakePasskeyBackend(log);
+            ServiceRegistry registry = new ServiceRegistry();
+            registry.For<IPasskeyBackend>().Use(backend);
+            registry.For<IPasskeyAuthenticator>().Use(new FakePasskeyAuthenticator(log));
+            registry.AddPasskeyClient(PasskeyClientFixture.ValidConfiguration());
+            Window? window = null;
+            SampleNavigator navigator = new SampleNavigator(registry, () => window);
+            registry.AddPasskeyUi(navigator);
+            window = new Window(navigator.StartPage());
+            string start = Root(window);
+
+            navigator.SignedInAsync(new PasskeySignIn { Handle = "ada" }, PasskeyFlow.SignIn).GetAwaiter().GetResult();
+            string signedIn = Root(window);
+            SignedInPage page = (SignedInPage)((NavigationPage)window.Page!).RootPage;
+            page.ManagePasskeysAsync().GetAwaiter().GetResult();
+            string managed = Stack(window);
+
+            page.SignOutAsync().GetAwaiter().GetResult();
+            string signedOut = Root(window);
+
+            navigator.SignedInAsync(new PasskeySignIn { Handle = "ada" }, PasskeyFlow.SignIn).GetAwaiter().GetResult();
+            SignedInPage again = (SignedInPage)((NavigationPage)window.Page!).RootPage;
+            backend.Failures["backend.signOut"] = new HttpRequestException("offline");
+            again.SignOutAsync().GetAwaiter().GetResult();
+            string failedSignOut = Root(window);
+
+            navigator.RegistrationRequestedAsync().GetAwaiter().GetResult();
+            string registration = Root(window);
+
+            bool noWindowRefused;
+            try
+            {
+                new SampleNavigator(registry, () => null).SignInRequestedAsync().GetAwaiter().GetResult();
+                noWindowRefused = false;
+            }
+            catch (InvalidOperationException)
+            {
+                noWindowRefused = true;
+            }
+            return new NavigationOutcome(start, signedIn, managed, signedOut, failedSignOut, registration, noWindowRefused, log.Calls.Count(call => call == "backend.signOut"));
+        })
+        .TheTest
+        .ShouldPass<NavigationOutcome>((because, outcome) =>
+        {
+            because.ItsTrue("the app opens on sign-in: " + outcome.Start, outcome.Start == nameof(PasskeySignInPage));
+            because.ItsTrue("signing in swaps the root to the signed-in page: " + outcome.SignedIn, outcome.SignedIn == nameof(SignedInPage));
+            because.ItsTrue("manage pushes management on top of the signed-in page: " + outcome.Managed, outcome.Managed == nameof(SignedInPage) + ">" + nameof(PasskeyManagementPage));
+            because.ItsTrue("signing out returns to sign-in: " + outcome.SignedOut, outcome.SignedOut == nameof(PasskeySignInPage));
+            because.ItsTrue("a failed sign-out still returns to sign-in: " + outcome.FailedSignOut, outcome.FailedSignOut == nameof(PasskeySignInPage));
+            because.ItsTrue("create an account shows registration: " + outcome.Registration, outcome.Registration == nameof(PasskeyRegistrationPage));
+            because.ItsTrue("a move with no window fails instead of passing silently", outcome.NoWindowRefused);
+            because.ItsTrue("both sign-outs reached the backend: " + outcome.SignOutCalls, outcome.SignOutCalls == 2);
+        })
+        .SoBeHappy()
+        .UnlessItFailed();
+    }
+
+    private static string Root(Window window) => ((NavigationPage)window.Page!).RootPage.GetType().Name;
+
+    private static string Stack(Window window) => string.Join(">", ((NavigationPage)window.Page!).Navigation.NavigationStack.Select(page => page.GetType().Name));
+
+    private static SampleSettings Bundled(string resourceName)
+    {
+        using Stream stream = typeof(SampleAppShould).Assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException(resourceName + " is not embedded in the tests.");
+        return SampleSettings.Read(stream);
+    }
+
+    // The relying party, the endpoint the backend really uses (it must accept the settings) and the app name.
+    private static string Describe(SampleSettings settings)
+    {
+        PasskeyConfiguration configuration = settings.ToConfiguration();
+        PasskeyHttpBackendOptions options = settings.ToBackendOptions();
+        using HttpPasskeyBackend backend = HttpPasskeyBackend.Create(configuration, options);
+        Uri endpoint = options.AccountEndpoint ?? new Uri("https://" + configuration.RelyingPartyId + "/account/");
+        return configuration.RelyingPartyId + "|" + endpoint.AbsoluteUri + "|" + configuration.Branding.ApplicationName;
     }
 
     private static SampleSettings Read(string json)
@@ -169,11 +262,13 @@ public class SampleAppShould : UnitTestMenuContainer
         }
     }
 
-    private sealed record DefaultOutcome(string RelyingPartyId, string ApplicationName, bool DefaultEndpoint, bool AskForEmail);
+    private sealed record LevelOutcome(string Prod, string Test, string Dev, bool AskForEmail);
 
     private sealed record BrandOutcome(string RelyingPartyId, string ApplicationName, string PrimaryColor, string? Endpoint, bool AskForEmail);
 
-    private sealed record RefusalOutcome(bool UnknownMember, bool Truncated, bool Empty, bool SchemeInRelyingParty, bool BlankRelyingParty, bool EndpointNotUri, bool EndpointOffSite, bool EndpointNotHttps);
+    private sealed record RefusalOutcome(bool UnknownMember, bool Truncated, bool Empty, bool SchemeInRelyingParty, bool BlankRelyingParty, bool EndpointNotUri, bool EndpointOffSite, bool EndpointNotHttps, bool DuplicateKey, bool NumericThemeMode, bool UndefinedThemeMode, bool NamedThemeMode);
+
+    private sealed record NavigationOutcome(string Start, string SignedIn, string Managed, string SignedOut, string FailedSignOut, string Registration, bool NoWindowRefused, int SignOutCalls);
 
     private sealed record DescribeOutcome(string HandleOnly, string WithName, string BlankName);
 }

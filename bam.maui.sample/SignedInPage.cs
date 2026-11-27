@@ -10,7 +10,7 @@ public sealed class SignedInPage : ContentPage
 {
     private readonly IPasskeyClient _client;
     private readonly SampleNavigator _navigator;
-    private readonly Label _status;
+    private readonly Button _manage;
     private readonly Button _signOut;
 
     /// <summary>Creates the page.</summary>
@@ -30,18 +30,16 @@ public sealed class SignedInPage : ContentPage
 
         Label who = new Label { Text = Describe(signIn), FontSize = 20 };
         who.SetDynamicResource(Label.TextColorProperty, PasskeyResourceKeys.Text);
-        _status = new Label { IsVisible = false };
-        _status.SetDynamicResource(Label.TextColorProperty, PasskeyResourceKeys.Error);
-        Button manage = new Button { Text = "Manage passkeys" };
-        manage.SetDynamicResource(Button.BackgroundColorProperty, PasskeyResourceKeys.Primary);
-        manage.SetDynamicResource(Button.TextColorProperty, PasskeyResourceKeys.OnPrimary);
-        manage.Clicked += async (_, _) => await _navigator.ManagePasskeysAsync(this);
+        _manage = new Button { Text = "Manage passkeys" };
+        _manage.SetDynamicResource(Button.BackgroundColorProperty, PasskeyResourceKeys.Primary);
+        _manage.SetDynamicResource(Button.TextColorProperty, PasskeyResourceKeys.OnPrimary);
+        _manage.Clicked += async (_, _) => await ManagePasskeysAsync();
         _signOut = new Button { Text = "Sign out" };
         _signOut.SetDynamicResource(Button.BackgroundColorProperty, PasskeyResourceKeys.Secondary);
         _signOut.SetDynamicResource(Button.TextColorProperty, PasskeyResourceKeys.OnPrimary);
         _signOut.Clicked += async (_, _) => await SignOutAsync();
 
-        Content = new VerticalStackLayout { Padding = 24, Spacing = 16, Children = { who, manage, _signOut, _status } };
+        Content = new VerticalStackLayout { Padding = 24, Spacing = 16, Children = { who, _manage, _signOut } };
     }
 
     /// <summary>The line naming the account: the display name when the backend sent one, and the handle.</summary>
@@ -55,18 +53,46 @@ public sealed class SignedInPage : ContentPage
             : "Signed in as " + signIn.DisplayName + " (" + signIn.Handle + ")";
     }
 
-    private async Task SignOutAsync()
+    /// <summary>
+    /// Opens passkey management on top of this page.  The button is off while the page is being pushed, so a quick
+    /// second tap doesn't push a second management page.
+    /// </summary>
+    /// <returns>A task that completes when the page is shown.</returns>
+    public async Task ManagePasskeysAsync()
     {
-        _signOut.IsEnabled = false;
-        _status.IsVisible = false;
-        PasskeyResult<PasskeySignOut> result = await _client.SignOutAsync();
-        if (result.Succeeded && result.Value is not null)
+        if (!_manage.IsEnabled)
         {
-            await _navigator.SignedOutAsync(result.Value);
             return;
         }
-        _status.Text = result.Error?.Message ?? "Sign-out didn't finish. Try again.";
-        _status.IsVisible = true;
-        _signOut.IsEnabled = true;
+        _manage.IsEnabled = false;
+        try
+        {
+            await _navigator.ManagePasskeysAsync(this);
+        }
+        finally
+        {
+            _manage.IsEnabled = true;
+        }
+    }
+
+    /// <summary>
+    /// Signs out and returns to sign-in, whatever the server answered: the client forgets the session either way, so a
+    /// failed sign-out leaves this device signed out too, as the library's management screen treats it.
+    /// </summary>
+    /// <returns>A task that completes when the sign-in screen is shown.</returns>
+    public async Task SignOutAsync()
+    {
+        _signOut.IsEnabled = false;
+        try
+        {
+            PasskeyResult<PasskeySignOut> result = await _client.SignOutAsync();
+            PasskeySignOut signOut = result.Succeeded && result.Value is not null ? result.Value : new PasskeySignOut { SignedOut = true };
+            await _navigator.SignedOutAsync(signOut);
+        }
+        finally
+        {
+            // Back on, in case the move itself failed and this page is still showing.
+            _signOut.IsEnabled = true;
+        }
     }
 }

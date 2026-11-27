@@ -1,0 +1,11 @@
+{
+  // dev: its own relying party, so a dev passkey can never sign in on test or prod (bam.useraccounts#37).
+  "relyingPartyId": "dev.whoiam.is",
+  "accountEndpoint": null,
+  "askForEmail": false,
+  "branding": {
+    "applicationName": "Passkey Sample (dev)",
+    "primaryColor": "#2457C5",
+    "secondaryColor": "#172B4D"
+  }
+}

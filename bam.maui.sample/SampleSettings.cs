@@ -4,7 +4,7 @@ using Bam.Maui.Passkeys;
 namespace Bam.Maui.Sample;
 
 /// <summary>
-/// What the sample app reads from its bundled <c>samplesettings.json</c>: the relying party it signs in to, where the
+/// What the sample app reads from its bundled <c>samplesettings.json</c> (the build embeds the level's <c>samplesettings.&lt;level&gt;.json</c> under that name): the relying party it signs in to, where the
 /// account endpoints are, and the brand it wears.  Everything brand-specific in the app comes from here, so a second
 /// brand is a second settings file, not a code change.  Unknown members are refused, so a misspelt key fails at start-up
 /// instead of silently falling back to the default.
@@ -20,6 +20,10 @@ public sealed class SampleSettings
         UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow,
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = false,
+        // A key given twice is refused rather than the last one silently winning.
+        AllowDuplicateProperties = false,
+        // themeMode reads as its name ("Dark"); numbers, and names that aren't defined, are refused.
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: false) },
     };
 
     /// <summary>The relying-party id; <c>whoiam.is</c>, the default brand, when the file leaves it out.</summary>

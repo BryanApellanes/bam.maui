@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-	<!-- No backup: the session cookie stays on this device. -->
+	<!-- No backup: the app keeps nothing worth restoring (the session cookie is only ever in memory), so nothing leaves the device. -->
 	<application android:allowBackup="false" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true"></application>
 	<uses-permission android:name="android.permission.INTERNET" />
 </manifest>

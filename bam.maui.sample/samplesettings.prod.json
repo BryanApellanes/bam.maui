@@ -1,0 +1,11 @@
+{
+  // prod: whoiam.is, Three Headz's own brand; the site answers on www (the bare domain only redirects). A brand on its own domain replaces these values (bam.useraccounts#37).
+  "relyingPartyId": "whoiam.is",
+  "accountEndpoint": "https://www.whoiam.is/account/",
+  "askForEmail": false,
+  "branding": {
+    "applicationName": "Passkey Sample",
+    "primaryColor": "#2457C5",
+    "secondaryColor": "#172B4D"
+  }
+}
